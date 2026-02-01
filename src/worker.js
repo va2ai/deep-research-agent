@@ -117,6 +117,10 @@ export default {
   },
 };
 
+/**
+ * Returns CORS headers for cross-origin requests
+ * @returns {Object} CORS headers object
+ */
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
@@ -125,6 +129,12 @@ function corsHeaders() {
   };
 }
 
+/**
+ * Validates the API key from request headers against configured key
+ * @param {Request} request - The incoming request
+ * @param {Object} env - Environment variables containing RECRUITER_API_KEY
+ * @returns {boolean} True if valid or no key configured (dev mode)
+ */
 function validateApiKey(request, env) {
   const apiKey = request.headers.get("X-API-Key");
   if (!env.RECRUITER_API_KEY) {
@@ -134,6 +144,10 @@ function validateApiKey(request, env) {
   return apiKey === env.RECRUITER_API_KEY;
 }
 
+/**
+ * Generates the HTML documentation page for the API
+ * @returns {string} HTML string for the docs page
+ */
 function docsHtml() {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -295,6 +309,12 @@ function docsHtml() {
 </html>`;
 }
 
+/**
+ * Creates a JSON response with CORS headers
+ * @param {Object} obj - Object to serialize as JSON
+ * @param {number} [status=200] - HTTP status code
+ * @returns {Response} Fetch API Response object
+ */
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj, null, 2), {
     status,
@@ -305,6 +325,11 @@ function json(obj, status = 200) {
   });
 }
 
+/**
+ * Safely parses JSON from a request body
+ * @param {Request} request - The incoming request
+ * @returns {Promise<Object|null>} Parsed JSON or null if invalid
+ */
 async function safeJson(request) {
   const ct = request.headers.get("content-type") || "";
   if (!ct.toLowerCase().includes("application/json")) return null;
@@ -315,18 +340,38 @@ async function safeJson(request) {
   }
 }
 
+/**
+ * Clamps an integer value within a range
+ * @param {*} v - Value to clamp
+ * @param {number} min - Minimum value
+ * @param {number} max - Maximum value
+ * @returns {number} Clamped integer value
+ */
 function clampInt(v, min, max) {
   const n = Number(v);
   if (!Number.isFinite(n)) return min;
   return Math.max(min, Math.min(max, Math.trunc(n)));
 }
 
+/**
+ * Normalizes web context size to valid enum value
+ * @param {*} v - Input value
+ * @returns {"low"|"medium"|"high"} Normalized context size
+ */
 function normalizeWebContextSize(v) {
   const s = String(v || "").toLowerCase();
   if (s === "low" || s === "medium" || s === "high") return s;
   return "medium";
 }
 
+/**
+ * Clamps a float value within a range with default fallback
+ * @param {*} v - Value to clamp
+ * @param {number} min - Minimum value
+ * @param {number} max - Maximum value
+ * @param {*} defaultVal - Default value if input is null/undefined/invalid
+ * @returns {number|*} Clamped float or default value
+ */
 function clampFloat(v, min, max, defaultVal) {
   if (v === null || v === undefined) return defaultVal;
   const n = Number(v);
@@ -334,6 +379,11 @@ function clampFloat(v, min, max, defaultVal) {
   return Math.max(min, Math.min(max, n));
 }
 
+/**
+ * Normalizes reasoning effort to valid enum value for o1/o3 models
+ * @param {*} v - Input value
+ * @returns {"low"|"medium"|"high"|null} Normalized reasoning effort or null
+ */
 function normalizeReasoningEffort(v) {
   if (!v) return null;
   const s = String(v).toLowerCase();
@@ -341,6 +391,11 @@ function normalizeReasoningEffort(v) {
   return null;
 }
 
+/**
+ * Normalizes reasoning summary to valid enum value
+ * @param {*} v - Input value
+ * @returns {"auto"|"concise"|"detailed"|null} Normalized reasoning summary or null
+ */
 function normalizeReasoningSummary(v) {
   if (!v) return null;
   const s = String(v).toLowerCase();
@@ -348,6 +403,11 @@ function normalizeReasoningSummary(v) {
   return null;
 }
 
+/**
+ * Checks if model is a deep research model (o3-deep-research, o4-mini-deep-research)
+ * @param {string} model - Model name
+ * @returns {boolean} True if deep research model
+ */
 function isDeepResearchModel(model) {
   return model && model.includes("deep-research");
 }
@@ -392,6 +452,11 @@ async function retryWithBackoff(fn, options = {}) {
   return lastError;
 }
 
+/**
+ * Delays execution for specified milliseconds
+ * @param {number} ms - Milliseconds to sleep
+ * @returns {Promise<void>} Promise that resolves after delay
+ */
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -419,6 +484,15 @@ function defaultShouldRetry(result) {
   return false;
 }
 
+/**
+ * Normalizes user location object for web search
+ * @param {Object} v - User location input
+ * @param {string} [v.country] - ISO 2-letter country code
+ * @param {string} [v.city] - City name
+ * @param {string} [v.region] - State/region
+ * @param {string} [v.timezone] - IANA timezone
+ * @returns {Object|null} Normalized location object or null
+ */
 function normalizeUserLocation(v) {
   if (!v || typeof v !== "object") return null;
   const loc = { type: "approximate" };
@@ -429,6 +503,12 @@ function normalizeUserLocation(v) {
   return Object.keys(loc).length > 1 ? loc : null;
 }
 
+/**
+ * Builds web search tool configuration for OpenAI API
+ * @param {Object} cfg - Research configuration
+ * @param {string} [contextSize] - Override for search context size
+ * @returns {Object} Web search tool configuration
+ */
 function buildWebSearchTool(cfg, contextSize) {
   const tool = {
     type: "web_search_preview",
@@ -440,6 +520,11 @@ function buildWebSearchTool(cfg, contextSize) {
   return tool;
 }
 
+/**
+ * Builds common payload options for OpenAI Responses API
+ * @param {Object} cfg - Research configuration
+ * @returns {Object} Payload options (temperature, top_p, reasoning, etc.)
+ */
 function buildPayloadOptions(cfg) {
   const opts = {};
   if (cfg.temperature !== null) opts.temperature = cfg.temperature;
@@ -464,6 +549,12 @@ function buildPayloadOptions(cfg) {
   return opts;
 }
 
+/**
+ * Builds tools array for OpenAI Responses API
+ * @param {Object} cfg - Research configuration
+ * @param {string} [contextSize] - Override for web search context size
+ * @returns {Array} Array of tool configurations
+ */
 function buildTools(cfg, contextSize) {
   const tools = [buildWebSearchTool(cfg, contextSize || cfg.webContextSize)];
 
@@ -478,6 +569,11 @@ function buildTools(cfg, contextSize) {
   return tools;
 }
 
+/**
+ * Safely parses a JSON string
+ * @param {string} s - JSON string to parse
+ * @returns {Object|null} Parsed object or null on error
+ */
 function safeJsonParse(s) {
   try {
     return JSON.parse(s);
@@ -486,6 +582,11 @@ function safeJsonParse(s) {
   }
 }
 
+/**
+ * Extracts JSON object from text by finding first { to last }
+ * @param {string} text - Text potentially containing JSON
+ * @returns {string} Extracted JSON string or original text
+ */
 function sliceJsonBlock(text) {
   const i = text.indexOf("{");
   const j = text.lastIndexOf("}");
@@ -493,6 +594,11 @@ function sliceJsonBlock(text) {
   return text;
 }
 
+/**
+ * Scores source quality based on URL domain
+ * @param {string} url - Source URL
+ * @returns {number} Quality score (1-5): 5=gov/edu, 4=standards/academic, 3=reference, 2=blogs, 1=social
+ */
 function domainQualityScore(url) {
   const u = (url || "").toLowerCase();
 
@@ -523,6 +629,11 @@ function domainQualityScore(url) {
   return 2;
 }
 
+/**
+ * Deduplicates facts array by case-insensitive fact text
+ * @param {Array<Object>} facts - Array of fact objects
+ * @returns {Array<Object>} Deduplicated facts array
+ */
 function dedupeFacts(facts) {
   const seen = new Set();
   const out = [];
@@ -536,10 +647,21 @@ function dedupeFacts(facts) {
   return out;
 }
 
+/**
+ * Normalizes URL by trimming whitespace
+ * @param {string} url - URL to normalize
+ * @returns {string} Trimmed URL
+ */
 function normalizeUrl(url) {
   return (url || "").trim();
 }
 
+/**
+ * Checks if URL is allowed by forceDomains filter
+ * @param {string} url - URL to check
+ * @param {Array<string>|null} forceDomains - Domain filter list (e.g., [".gov", "openai.com"])
+ * @returns {boolean} True if allowed or no filter set
+ */
 function urlAllowedByForceDomains(url, forceDomains) {
   if (!forceDomains || forceDomains.length === 0) return true;
   try {
@@ -624,6 +746,14 @@ function extractText(respData) {
   return chunks.join("\n").trim();
 }
 
+/**
+ * Stage 1: Generates a research plan with search queries and stop conditions
+ * @param {Object} params - Planner parameters
+ * @param {string} params.question - User's research question
+ * @param {Object} params.cfg - Research configuration
+ * @param {Object} params.env - Environment variables
+ * @returns {Promise<Object>} Research plan with queries, source preferences, and stop conditions
+ */
 async function planner({ question, cfg, env }) {
   const prompt = `
 You are a research planner. Create a web research plan for the user question.
@@ -672,6 +802,14 @@ Rules:
   return plan;
 }
 
+/**
+ * Stage 2: Executes a web search query using OpenAI's web_search tool
+ * @param {Object} params - Web search parameters
+ * @param {string} params.query - Search query
+ * @param {Object} params.cfg - Research configuration
+ * @param {Object} params.env - Environment variables
+ * @returns {Promise<Object>} Search results with response_id, snippetsText, and raw data
+ */
 async function webSearch({ query, cfg, env }) {
   // NOTE: This relies on the built-in "web_search" tool via Responses.
   const payload = {
@@ -691,6 +829,15 @@ async function webSearch({ query, cfg, env }) {
   };
 }
 
+/**
+ * Stage 3: Extracts atomic facts from search snippets
+ * @param {Object} params - Extraction parameters
+ * @param {string} params.question - User's research question
+ * @param {string} params.snippets - Raw text snippets from web search
+ * @param {Object} params.cfg - Research configuration
+ * @param {Object} params.env - Environment variables
+ * @returns {Promise<Object>} Object with facts array and conflicts array
+ */
 async function extractFacts({ question, snippets, cfg, env }) {
   const prompt = `
 You are a careful fact extractor. Use ONLY the provided snippets.
@@ -744,6 +891,16 @@ Rules:
   return safeJsonParse(sliceJsonBlock(text)) || { facts: [], conflicts: [] };
 }
 
+/**
+ * Stage 4: Synthesizes facts into a coherent answer with citations
+ * @param {Object} params - Synthesis parameters
+ * @param {string} params.question - User's research question
+ * @param {Array<Object>} params.facts - Extracted facts array
+ * @param {Array<Object>} params.conflicts - Detected conflicts between sources
+ * @param {Object} params.cfg - Research configuration
+ * @param {Object} params.env - Environment variables
+ * @returns {Promise<string>} Synthesized answer with [F#] citations
+ */
 async function synthesize({ question, facts, conflicts, cfg, env }) {
   const factLines = facts.map((f, idx) => `[F${idx + 1}] ${f.fact} (src: ${f.url})`).join("\n");
   const conflictsBlock = JSON.stringify(conflicts || [], null, 2);
@@ -781,6 +938,16 @@ Write the best possible answer:
   return extractText(resp.data);
 }
 
+/**
+ * Stage 5: Validates that all claims in the answer are supported by facts
+ * @param {Object} params - Validation parameters
+ * @param {string} params.question - User's research question
+ * @param {Array<Object>} params.facts - Extracted facts array
+ * @param {string} params.draft - Draft answer to validate
+ * @param {Object} params.cfg - Research configuration
+ * @param {Object} params.env - Environment variables
+ * @returns {Promise<Object>} Validation result with ok, issues, and revised_answer
+ */
 async function validate({ question, facts, draft, cfg, env }) {
   const factLines = facts.map((f, idx) => `[F${idx + 1}] ${f.fact} (src: ${f.url})`).join("\n");
 
@@ -823,6 +990,15 @@ Return VALID JSON ONLY:
   return safeJsonParse(sliceJsonBlock(text)) || { ok: false, issues: ["Validator JSON parse failed"], revised_answer: draft };
 }
 
+/**
+ * Main research pipeline orchestrator
+ * Executes the 5-stage research pipeline: plan -> search -> extract -> synthesize -> validate
+ * @param {Object} params - Research parameters
+ * @param {string} params.question - User's research question
+ * @param {Object} params.cfg - Research configuration options
+ * @param {Object} params.env - Environment variables with API keys
+ * @returns {Promise<Object>} Complete research result with answer, facts, validation, and trace
+ */
 async function deepResearchAgent({ question, cfg, env }) {
   const trace = [];
   const startedAt = new Date().toISOString();
