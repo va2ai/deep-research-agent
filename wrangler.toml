@@ -1,0 +1,9 @@
+name = "deep-research-agent"
+main = "src/worker.js"
+compatibility_date = "2026-01-31"
+
+[vars]
+OPENAI_MODEL = "gpt-4o-mini"
+
+# Set secrets via:
+# wrangler secret put OPENAI_API_KEY

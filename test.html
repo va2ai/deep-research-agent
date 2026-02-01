@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deep Research Agent - Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 1100px; margin: 0 auto; padding: 2rem; background: #f0f4f8; }
+    h1 { color: #1a1a2e; margin-bottom: 1.5rem; text-align: center; }
+    h4 { color: #374151; margin: 1rem 0 0.5rem; font-size: 0.95rem; }
+    .container { background: #fff; border-radius: 12px; padding: 2rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    label { display: block; font-weight: 600; margin-bottom: 0.5rem; color: #374151; font-size: 0.85rem; }
+    input, textarea, select { width: 100%; padding: 0.6rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.95rem; margin-bottom: 0.75rem; }
+    textarea { min-height: 80px; resize: vertical; }
+    .options-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; }
+    .option-group { background: #f9fafb; padding: 0.75rem; border-radius: 6px; }
+    .option-group label { margin-bottom: 0.25rem; font-size: 0.8rem; }
+    .option-group input, .option-group select { margin-bottom: 0; font-size: 0.9rem; padding: 0.5rem; }
+    .option-group input[type="checkbox"] { width: auto; margin-right: 0.5rem; }
+    .checkbox-group { display: flex; align-items: center; }
+    .checkbox-group label { margin: 0; }
+    button { background: #3b82f6; color: white; border: none; padding: 1rem 2rem; font-size: 1rem; font-weight: 600; border-radius: 8px; cursor: pointer; width: 100%; transition: background 0.2s; }
+    button:hover { background: #2563eb; }
+    button:disabled { background: #9ca3af; cursor: not-allowed; }
+    .status { margin-top: 1rem; padding: 1rem; border-radius: 8px; display: none; }
+    .status.loading { display: block; background: #dbeafe; color: #1e40af; }
+    .status.error { display: block; background: #fee2e2; color: #991b1b; }
+    .status.success { display: block; background: #d1fae5; color: #065f46; }
+    .results { margin-top: 2rem; display: none; }
+    .results.show { display: block; }
+    .result-section { background: #f9fafb; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; }
+    .result-section h3 { color: #1f2937; margin-bottom: 1rem; border-bottom: 2px solid #e5e7eb; padding-bottom: 0.5rem; }
+    .answer { font-size: 1.1rem; line-height: 1.8; white-space: pre-wrap; }
+    .fact-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .fact-table th, .fact-table td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
+    .fact-table th { background: #f3f4f6; font-weight: 600; }
+    .fact-table a { color: #3b82f6; text-decoration: none; }
+    .fact-table a:hover { text-decoration: underline; }
+    .badge { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .quality-5 { background: #d1fae5; color: #065f46; }
+    .quality-4 { background: #dbeafe; color: #1e40af; }
+    .quality-3 { background: #fef3c7; color: #92400e; }
+    .quality-2 { background: #fed7aa; color: #9a3412; }
+    .quality-1 { background: #fecaca; color: #991b1b; }
+    pre { background: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.85rem; max-height: 400px; overflow-y: auto; }
+    .trace-item { padding: 0.5rem; margin: 0.25rem 0; background: #f3f4f6; border-radius: 4px; font-size: 0.9rem; }
+    .trace-phase { font-weight: 600; color: #3b82f6; }
+    .spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 0.5rem; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .timing { color: #6b7280; font-size: 0.9rem; margin-top: 0.5rem; }
+    .debug-panel { background: #1a1a2e; border-radius: 8px; padding: 1rem; margin-top: 1rem; display: none; }
+    .debug-panel.show { display: block; }
+    .debug-panel h4 { color: #e5e7eb; margin-bottom: 0.5rem; font-size: 0.9rem; }
+    .debug-log { background: #0d1117; color: #7ee787; padding: 1rem; border-radius: 4px; font-family: monospace; font-size: 0.8rem; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+    .debug-log .log-time { color: #8b949e; }
+    .debug-log .log-info { color: #58a6ff; }
+    .debug-log .log-warn { color: #d29922; }
+    .debug-log .log-error { color: #f85149; }
+    .debug-log .log-success { color: #7ee787; }
+    .debug-toggle { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }
+    .debug-toggle input { width: auto; margin: 0; }
+    .debug-toggle label { margin: 0; font-weight: normal; font-size: 0.9rem; }
+    details { margin-bottom: 1rem; }
+    summary { cursor: pointer; font-weight: 600; color: #374151; padding: 0.5rem 0; }
+    .section-divider { border-top: 1px solid #e5e7eb; margin: 1rem 0; padding-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Deep Research Agent Test</h1>
+
+  <div class="container">
+    <label for="question">Research Question</label>
+    <textarea id="question" placeholder="Enter your research question...">What is the OpenAI Responses API and how does it differ from the Chat Completions API?</textarea>
+
+    <details open>
+      <summary>Model Settings</summary>
+      <div class="options-grid">
+        <div class="option-group">
+          <label for="model">Model</label>
+          <select id="model">
+            <optgroup label="Deep Research (Comprehensive Reports)">
+              <option value="o3-deep-research">o3 Deep Research</option>
+              <option value="o4-mini-deep-research">o4 Mini Deep Research</option>
+            </optgroup>
+            <optgroup label="GPT-5 Series (Latest)">
+              <option value="gpt-5.2">GPT-5.2 (Flagship)</option>
+              <option value="gpt-5.1">GPT-5.1</option>
+              <option value="gpt-5">GPT-5</option>
+            </optgroup>
+            <optgroup label="GPT-4.1 Series">
+              <option value="gpt-4.1">GPT-4.1 (1M context)</option>
+              <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
+              <option value="gpt-4.1-nano">GPT-4.1 Nano</option>
+            </optgroup>
+            <optgroup label="GPT-4o Series">
+              <option value="gpt-4o" selected>GPT-4o</option>
+              <option value="gpt-4o-mini">GPT-4o Mini</option>
+            </optgroup>
+            <optgroup label="o-Series (Reasoning)">
+              <option value="o4-mini">o4 Mini</option>
+              <option value="o3-pro">o3 Pro</option>
+              <option value="o3">o3</option>
+              <option value="o3-mini">o3 Mini</option>
+              <option value="o1">o1</option>
+              <option value="o1-mini">o1 Mini</option>
+            </optgroup>
+          </select>
+        </div>
+        <div class="option-group">
+          <label for="temperature">Temperature (0-2)</label>
+          <input type="number" id="temperature" value="" min="0" max="2" step="0.1" placeholder="1.0">
+        </div>
+        <div class="option-group">
+          <label for="top_p">Top P (0-1)</label>
+          <input type="number" id="top_p" value="" min="0" max="1" step="0.1" placeholder="1.0">
+        </div>
+        <div class="option-group">
+          <label for="max_output_tokens">Max Output Tokens</label>
+          <input type="number" id="max_output_tokens" value="" min="1" max="128000" placeholder="16384">
+        </div>
+        <div class="option-group">
+          <label for="reasoning_effort">Reasoning Effort (o1/o3)</label>
+          <select id="reasoning_effort">
+            <option value="">Default</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+        <div class="option-group checkbox-group">
+          <input type="checkbox" id="store" checked>
+          <label for="store">Store Response</label>
+        </div>
+      </div>
+    </details>
+
+    <details id="deepResearchDetails">
+      <summary>Deep Research Options (o3/o4-mini-deep-research)</summary>
+      <div class="options-grid">
+        <div class="option-group checkbox-group">
+          <input type="checkbox" id="background" checked>
+          <label for="background">Background Mode (recommended)</label>
+        </div>
+        <div class="option-group checkbox-group">
+          <input type="checkbox" id="codeInterpreter">
+          <label for="codeInterpreter">Enable Code Interpreter</label>
+        </div>
+        <div class="option-group">
+          <label for="maxToolCalls">Max Tool Calls</label>
+          <input type="number" id="maxToolCalls" value="" min="1" max="1000" placeholder="unlimited">
+        </div>
+        <div class="option-group">
+          <label for="reasoningSummary">Reasoning Summary</label>
+          <select id="reasoningSummary">
+            <option value="">None</option>
+            <option value="auto" selected>Auto</option>
+            <option value="concise">Concise</option>
+            <option value="detailed">Detailed</option>
+          </select>
+        </div>
+      </div>
+      <p style="font-size: 0.85rem; color: #6b7280; margin-top: 0.75rem;">
+        Deep research can take 10-30+ minutes. Background mode prevents timeouts.
+        Code interpreter enables data analysis via Python code execution.
+      </p>
+    </details>
+
+    <details open>
+      <summary>Research Agent Settings</summary>
+      <div class="options-grid">
+        <div class="option-group">
+          <label for="maxSearchRounds">Max Search Rounds (1-10)</label>
+          <input type="number" id="maxSearchRounds" value="4" min="1" max="10">
+        </div>
+        <div class="option-group">
+          <label for="maxFacts">Max Facts (5-50)</label>
+          <input type="number" id="maxFacts" value="18" min="5" max="50">
+        </div>
+        <div class="option-group">
+          <label for="minNewFactsPerRound">Min New Facts/Round</label>
+          <input type="number" id="minNewFactsPerRound" value="2" min="0" max="10">
+        </div>
+      </div>
+    </details>
+
+    <details open>
+      <summary>Web Search Settings</summary>
+      <div class="options-grid">
+        <div class="option-group">
+          <label for="webContextSize">Search Context Size</label>
+          <select id="webContextSize">
+            <option value="low">Low (fastest, less context)</option>
+            <option value="medium" selected>Medium (balanced)</option>
+            <option value="high">High (most context)</option>
+          </select>
+        </div>
+        <div class="option-group">
+          <label for="forceDomains">Force Domains (comma-sep)</label>
+          <input type="text" id="forceDomains" placeholder=".gov, .edu, openai.com">
+        </div>
+      </div>
+      <h4>User Location (for localized results)</h4>
+      <div class="options-grid">
+        <div class="option-group">
+          <label for="userCountry">Country (ISO 2-letter)</label>
+          <input type="text" id="userCountry" placeholder="US" maxlength="2">
+        </div>
+        <div class="option-group">
+          <label for="userCity">City</label>
+          <input type="text" id="userCity" placeholder="San Francisco">
+        </div>
+        <div class="option-group">
+          <label for="userRegion">Region/State</label>
+          <input type="text" id="userRegion" placeholder="California">
+        </div>
+        <div class="option-group">
+          <label for="userTimezone">Timezone (IANA)</label>
+          <input type="text" id="userTimezone" placeholder="America/Los_Angeles">
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>System Instructions (optional)</summary>
+      <textarea id="instructions" placeholder="Custom instructions for the model..." style="min-height: 60px;"></textarea>
+    </details>
+
+    <div class="debug-toggle">
+      <input type="checkbox" id="showDebug" checked>
+      <label for="showDebug">Show debug logs</label>
+    </div>
+
+    <button id="submitBtn" onclick="runResearch()">Run Research</button>
+
+    <div id="status" class="status"></div>
+
+    <div id="debugPanel" class="debug-panel">
+      <h4>Debug Log</h4>
+      <div id="debugLog" class="debug-log"></div>
+    </div>
+  </div>
+
+  <div id="results" class="results">
+    <div class="result-section">
+      <h3>Answer</h3>
+      <div id="answer" class="answer"></div>
+      <div id="timing" class="timing"></div>
+    </div>
+
+    <div class="result-section">
+      <h3>Fact Table</h3>
+      <div id="factTable"></div>
+    </div>
+
+    <div class="result-section">
+      <h3>Conflicts</h3>
+      <div id="conflicts"></div>
+    </div>
+
+    <div class="result-section">
+      <h3>Execution Trace</h3>
+      <div id="trace"></div>
+    </div>
+
+    <div class="result-section">
+      <h3>Raw Response</h3>
+      <pre id="rawResponse"></pre>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'https://deep-research-agent.vetapp.workers.dev/research';
+    let debugEnabled = true;
+
+    function log(message, type = 'info') {
+      if (!debugEnabled) return;
+      const debugLog = document.getElementById('debugLog');
+      const debugPanel = document.getElementById('debugPanel');
+      debugPanel.className = 'debug-panel show';
+
+      const time = new Date().toISOString().split('T')[1].split('.')[0];
+      const typeClass = `log-${type}`;
+      debugLog.innerHTML += `<span class="log-time">[${time}]</span> <span class="${typeClass}">${escapeHtml(message)}</span>\n`;
+      debugLog.scrollTop = debugLog.scrollHeight;
+    }
+
+    function clearLog() {
+      document.getElementById('debugLog').innerHTML = '';
+    }
+
+    document.getElementById('showDebug').addEventListener('change', (e) => {
+      debugEnabled = e.target.checked;
+      document.getElementById('debugPanel').className = debugEnabled ? 'debug-panel show' : 'debug-panel';
+    });
+
+    // Show/hide deep research options based on model selection
+    const modelSelect = document.getElementById('model');
+    const deepResearchDetails = document.getElementById('deepResearchDetails');
+
+    function updateDeepResearchVisibility() {
+      const model = modelSelect.value;
+      const isDeepResearch = model.includes('deep-research');
+      deepResearchDetails.style.display = isDeepResearch ? 'block' : 'none';
+      if (isDeepResearch) {
+        deepResearchDetails.open = true;
+      }
+    }
+
+    modelSelect.addEventListener('change', updateDeepResearchVisibility);
+    updateDeepResearchVisibility();
+
+    async function runResearch() {
+      const btn = document.getElementById('submitBtn');
+      const status = document.getElementById('status');
+      const results = document.getElementById('results');
+
+      clearLog();
+
+      const question = document.getElementById('question').value.trim();
+      if (!question) {
+        status.className = 'status error';
+        status.textContent = 'Please enter a research question.';
+        log('ERROR: No question provided', 'error');
+        return;
+      }
+
+      // Build options
+      const options = {
+        // Model settings
+        model: document.getElementById('model').value,
+        store: document.getElementById('store').checked,
+
+        // Research agent settings
+        maxSearchRounds: parseInt(document.getElementById('maxSearchRounds').value) || 4,
+        maxFacts: parseInt(document.getElementById('maxFacts').value) || 18,
+        minNewFactsPerRound: parseInt(document.getElementById('minNewFactsPerRound').value) || 2,
+
+        // Web search settings
+        webContextSize: document.getElementById('webContextSize').value,
+      };
+
+      // Optional numeric params
+      const temperature = document.getElementById('temperature').value;
+      if (temperature !== '') options.temperature = parseFloat(temperature);
+
+      const top_p = document.getElementById('top_p').value;
+      if (top_p !== '') options.top_p = parseFloat(top_p);
+
+      const max_output_tokens = document.getElementById('max_output_tokens').value;
+      if (max_output_tokens !== '') options.max_output_tokens = parseInt(max_output_tokens);
+
+      const reasoning_effort = document.getElementById('reasoning_effort').value;
+      if (reasoning_effort) options.reasoning_effort = reasoning_effort;
+
+      const instructions = document.getElementById('instructions').value.trim();
+      if (instructions) options.instructions = instructions;
+
+      // Deep research options
+      const isDeepResearch = options.model.includes('deep-research');
+      if (isDeepResearch) {
+        options.background = document.getElementById('background').checked;
+        options.codeInterpreter = document.getElementById('codeInterpreter').checked;
+
+        const maxToolCalls = document.getElementById('maxToolCalls').value;
+        if (maxToolCalls !== '') options.maxToolCalls = parseInt(maxToolCalls);
+
+        const reasoningSummary = document.getElementById('reasoningSummary').value;
+        if (reasoningSummary) options.reasoningSummary = reasoningSummary;
+      }
+
+      // Force domains
+      const forceDomains = document.getElementById('forceDomains').value.trim();
+      if (forceDomains) {
+        options.forceDomains = forceDomains.split(',').map(d => d.trim()).filter(Boolean);
+      }
+
+      // User location
+      const userCountry = document.getElementById('userCountry').value.trim();
+      const userCity = document.getElementById('userCity').value.trim();
+      const userRegion = document.getElementById('userRegion').value.trim();
+      const userTimezone = document.getElementById('userTimezone').value.trim();
+      if (userCountry || userCity || userRegion || userTimezone) {
+        options.userLocation = {};
+        if (userCountry) options.userLocation.country = userCountry;
+        if (userCity) options.userLocation.city = userCity;
+        if (userRegion) options.userLocation.region = userRegion;
+        if (userTimezone) options.userLocation.timezone = userTimezone;
+      }
+
+      log(`Starting research with model: ${options.model}`, 'info');
+      log(`Question: "${question.substring(0, 100)}${question.length > 100 ? '...' : ''}"`, 'info');
+      log(`Research settings: maxSearchRounds=${options.maxSearchRounds}, maxFacts=${options.maxFacts}, webContextSize=${options.webContextSize}`, 'info');
+      if (options.temperature !== undefined) log(`Temperature: ${options.temperature}`, 'info');
+      if (options.top_p !== undefined) log(`Top P: ${options.top_p}`, 'info');
+      if (options.max_output_tokens) log(`Max output tokens: ${options.max_output_tokens}`, 'info');
+      if (options.reasoning_effort) log(`Reasoning effort: ${options.reasoning_effort}`, 'info');
+      if (options.instructions) log(`Instructions: "${options.instructions.substring(0, 50)}..."`, 'info');
+      if (options.forceDomains) log(`Force domains: ${options.forceDomains.join(', ')}`, 'info');
+      if (options.userLocation) log(`User location: ${JSON.stringify(options.userLocation)}`, 'info');
+      if (isDeepResearch) {
+        log(`Deep Research Mode: background=${options.background}, codeInterpreter=${options.codeInterpreter}`, 'warn');
+        if (options.background) log('Note: Deep research may take 10-30+ minutes in background mode', 'warn');
+      }
+
+      // Update UI
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>Researching...';
+      status.className = 'status loading';
+
+      // Dynamic status message based on options
+      let statusMsg = 'Running research';
+      if (isDeepResearch) {
+        statusMsg = `Running deep research with ${options.model}`;
+        if (options.background) {
+          statusMsg += ' in background mode. This may take 10-30+ minutes...';
+        } else {
+          statusMsg += '. This may take several minutes (consider enabling background mode)...';
+        }
+        if (options.codeInterpreter) {
+          statusMsg = statusMsg.replace('...', ' with code analysis...');
+        }
+      } else if (options.model.includes('o3') || options.model.includes('o4') || options.model.includes('o1')) {
+        statusMsg = `Running research with ${options.model} reasoning model. This may take 1-3 minutes...`;
+      } else if (options.model.includes('gpt-5')) {
+        statusMsg = `Running research with ${options.model}. This may take 30-90 seconds...`;
+      } else {
+        statusMsg = `Running research with ${options.model}. This may take 20-60 seconds...`;
+      }
+      status.textContent = statusMsg;
+      results.className = 'results';
+
+      const requestBody = { question, options };
+      log(`Request body: ${JSON.stringify(requestBody, null, 2)}`, 'info');
+      log('Sending request to API...', 'info');
+
+      try {
+        const startTime = Date.now();
+
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
+        });
+
+        log(`Response status: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+
+        const data = await response.json();
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+        log(`Response received in ${elapsed}s`, 'success');
+
+        if (!response.ok || data.error) {
+          const errMsg = data.error || data.message || 'Unknown error';
+          log(`API Error: ${errMsg}`, 'error');
+          throw new Error(errMsg);
+        }
+
+        // Log trace summary
+        if (data.trace) {
+          log('--- Execution Trace ---', 'info');
+          for (const t of data.trace) {
+            if (t.phase === 'plan') {
+              log(`[plan] Generated ${t.plan?.queries?.length || 0} search queries`, 'info');
+            } else if (t.phase === 'search') {
+              log(`[search] Round ${t.round}: "${t.query}"`, 'info');
+            } else if (t.phase === 'extract') {
+              log(`[extract] Round ${t.round}: +${t.newFacts} new facts (total: ${t.totalFacts}, sources: ${t.distinctSources})`, 'success');
+            } else if (t.phase === 'stop') {
+              log(`[stop] Reason: ${t.reason}`, 'warn');
+            } else if (t.phase === 'draft') {
+              log(`[draft] Generated ${t.draftLen} character answer`, 'info');
+            } else if (t.phase === 'validate') {
+              if (t.validation?.ok) {
+                log('[validate] Passed validation', 'success');
+              } else {
+                log(`[validate] Issues found: ${t.validation?.issues?.length || 0}`, 'warn');
+              }
+            }
+          }
+        }
+
+        log(`Final answer: ${data.answer?.length || 0} chars`, 'success');
+        log(`Facts collected: ${data.fact_table?.length || 0}`, 'success');
+        log(`Conflicts detected: ${data.conflicts?.length || 0}`, data.conflicts?.length > 0 ? 'warn' : 'success');
+
+        // Display results
+        status.className = 'status success';
+        status.textContent = 'Research complete!';
+        results.className = 'results show';
+
+        // Answer
+        document.getElementById('answer').textContent = data.answer || 'No answer generated.';
+        const configInfo = data.config || {};
+        let timingText = `Completed in ${elapsed}s | Model: ${configInfo.model || 'unknown'}`;
+        if (configInfo.temperature !== null) timingText += ` | Temp: ${configInfo.temperature}`;
+        if (configInfo.reasoning_effort) timingText += ` | Reasoning: ${configInfo.reasoning_effort}`;
+        timingText += ` | ${data.startedAt} - ${data.finishedAt}`;
+        document.getElementById('timing').textContent = timingText;
+
+        // Fact table
+        const factTableEl = document.getElementById('factTable');
+        if (data.fact_table && data.fact_table.length > 0) {
+          let html = '<table class="fact-table"><tr><th>ID</th><th>Fact</th><th>Source</th><th>Confidence</th><th>Quality</th></tr>';
+          for (const f of data.fact_table) {
+            const qualityClass = `quality-${f.source_quality}`;
+            let hostname = '';
+            try { hostname = new URL(f.url).hostname; } catch { hostname = f.url; }
+            html += `<tr>
+              <td>${f.id}</td>
+              <td>${escapeHtml(f.fact)}</td>
+              <td><a href="${f.url}" target="_blank">${escapeHtml(f.title || hostname)}</a></td>
+              <td>${f.confidence}/5</td>
+              <td><span class="badge ${qualityClass}">${f.source_quality}/5</span></td>
+            </tr>`;
+          }
+          html += '</table>';
+          factTableEl.innerHTML = html;
+        } else {
+          factTableEl.textContent = 'No facts extracted.';
+        }
+
+        // Conflicts
+        const conflictsEl = document.getElementById('conflicts');
+        if (data.conflicts && data.conflicts.length > 0) {
+          conflictsEl.innerHTML = data.conflicts.map(c =>
+            `<div class="trace-item"><strong>${escapeHtml(c.topic)}</strong>: "${escapeHtml(c.claim_a)}" vs "${escapeHtml(c.claim_b)}"</div>`
+          ).join('');
+        } else {
+          conflictsEl.textContent = 'No conflicts detected.';
+        }
+
+        // Trace
+        const traceEl = document.getElementById('trace');
+        if (data.trace && data.trace.length > 0) {
+          traceEl.innerHTML = data.trace.map(t => {
+            let detail = '';
+            if (t.phase === 'plan') detail = `${t.plan?.queries?.length || 0} queries planned`;
+            else if (t.phase === 'search') detail = `Round ${t.round}: "${t.query}"`;
+            else if (t.phase === 'extract') detail = `Round ${t.round}: +${t.newFacts} facts (total: ${t.totalFacts}, sources: ${t.distinctSources})`;
+            else if (t.phase === 'stop') detail = `Reason: ${t.reason}`;
+            else if (t.phase === 'draft') detail = `${t.draftLen} chars`;
+            else if (t.phase === 'validate') detail = t.validation?.ok ? 'Passed' : `Issues: ${t.validation?.issues?.length || 0}`;
+            return `<div class="trace-item"><span class="trace-phase">[${t.phase}]</span> ${detail}</div>`;
+          }).join('');
+        } else {
+          traceEl.textContent = 'No trace available.';
+        }
+
+        // Raw response
+        document.getElementById('rawResponse').textContent = JSON.stringify(data, null, 2);
+
+      } catch (err) {
+        log(`FATAL ERROR: ${err.message}`, 'error');
+        status.className = 'status error';
+        status.textContent = `Error: ${err.message}`;
+        results.className = 'results';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run Research';
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+  </script>
+</body>
+</html>
