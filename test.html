@@ -190,7 +190,7 @@
         </div>
         <div class="option-group">
           <label for="maxToolCalls">Max Tool Calls</label>
-          <input type="number" id="maxToolCalls" value="" min="1" max="1000" placeholder="unlimited">
+          <input type="number" id="maxToolCalls" value="50" min="1" max="200" placeholder="50">
         </div>
         <div class="option-group">
           <label for="reasoningSummary">Reasoning Summary</label>
@@ -203,8 +203,8 @@
         </div>
       </div>
       <p style="font-size: 0.85rem; color: #6b7280; margin-top: 0.75rem;">
-        Deep research can take 10-30+ minutes. Background mode prevents timeouts.
-        Code interpreter enables data analysis via Python code execution.
+        Deep research can take 5-30 minutes. Background mode prevents timeouts.
+        Lower Max Tool Calls to avoid rate limits (default: 50).
       </p>
     </details>
 

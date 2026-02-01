@@ -508,7 +508,8 @@ function buildPayloadOptions(cfg) {
   // Deep research options
   if (isDeepResearchModel(cfg.model)) {
     if (cfg.background) opts.background = true;
-    if (cfg.maxToolCalls) opts.max_tool_calls = cfg.maxToolCalls;
+    // Default to 50 tool calls to avoid rate limits (can be overridden)
+    opts.max_tool_calls = cfg.maxToolCalls || 50;
   }
 
   return opts;
@@ -907,20 +908,46 @@ async function runDeepResearchModel({ question, cfg, env }) {
     const startPoll = Date.now();
 
     let result = resp.data;
+    let consecutiveErrors = 0;
+    const maxConsecutiveErrors = 3;
+
     while ((result.status === "in_progress" || result.status === "queued") && (Date.now() - startPoll) < maxWait) {
       await new Promise(r => setTimeout(r, pollInterval));
 
-      const pollResp = await fetch(`https://api.openai.com/v1/responses/${result.id}`, {
-        headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` },
-      });
+      try {
+        const pollResp = await fetch(`https://api.openai.com/v1/responses/${result.id}`, {
+          headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` },
+        });
 
-      if (!pollResp.ok) {
-        const errText = await pollResp.text();
-        throw new Error(`Polling error: ${errText}`);
+        if (!pollResp.ok) {
+          const errData = await pollResp.json().catch(() => ({}));
+
+          // Handle rate limit - wait and retry
+          if (pollResp.status === 429) {
+            consecutiveErrors++;
+            const retryAfter = parseInt(pollResp.headers.get("retry-after") || "5", 10);
+            trace.push({ phase: "rate_limit", retryAfter, attempt: consecutiveErrors });
+
+            if (consecutiveErrors >= maxConsecutiveErrors) {
+              throw new Error(`Rate limit exceeded after ${maxConsecutiveErrors} retries`);
+            }
+
+            await new Promise(r => setTimeout(r, retryAfter * 1000));
+            continue;
+          }
+
+          throw new Error(`Polling error: ${JSON.stringify(errData)}`);
+        }
+
+        consecutiveErrors = 0; // Reset on success
+        result = await pollResp.json();
+        trace.push({ phase: "poll", status: result.status, elapsed: Math.round((Date.now() - startPoll) / 1000) });
+      } catch (err) {
+        if (err.message.includes("Rate limit")) throw err;
+        consecutiveErrors++;
+        if (consecutiveErrors >= maxConsecutiveErrors) throw err;
+        trace.push({ phase: "poll_error", error: err.message, attempt: consecutiveErrors });
       }
-
-      result = await pollResp.json();
-      trace.push({ phase: "poll", status: result.status, elapsed: Math.round((Date.now() - startPoll) / 1000) });
     }
 
     if (result.status === "in_progress" || result.status === "queued") {
