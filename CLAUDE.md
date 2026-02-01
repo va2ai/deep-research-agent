@@ -22,10 +22,16 @@ wrangler secret put OPENAI_API_KEY   # Set OpenAI API key
 ### API Endpoints (src/worker.js)
 - `GET /` or `/docs` - API documentation HTML
 - `GET /health` - Health check
-- `POST /research` - Main research endpoint
+- `POST /research` - Main research endpoint (returns immediately with `status: "in_progress"` for background deep research)
 - `GET /research/:responseId` - Resume/poll a background deep research job until completion
+  - Use `?wait=false` to return current status immediately without server-side polling
 - `GET /status/:responseId` - Get current status of a response (no polling)
 - `POST /cancel/:responseId` - Cancel an in-progress response
+
+### Deep Research Background Mode
+Deep research with `background: true` returns immediately with `status: "in_progress"` and a `response_id`.
+The client is responsible for polling `GET /research/:responseId?wait=false` to check completion status.
+This design avoids Cloudflare's subrequest limits (50 free tier, 1000 paid tier).
 
 ### Research Pipeline
 The `deepResearchAgent` function orchestrates a 5-stage pipeline:
