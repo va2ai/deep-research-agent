@@ -34,12 +34,9 @@ curl -X POST "https://deep-research-agent.vetapp.workers.dev/research" \
 
 ## Authentication
 
-The `/research` endpoint requires an API key passed via the `X-API-Key` header. Public endpoints (`/docs`, `/health`) remain accessible without authentication.
+The `/research` endpoint requires an API key. Contact me to request access.
 
-```bash
-# Set the recruiter API key secret
-wrangler secret put RECRUITER_API_KEY
-```
+Public endpoints (`/docs`, `/health`) remain accessible without authentication.
 
 ## Tech Stack
 
@@ -86,9 +83,8 @@ git clone https://github.com/va2ai/deep-research-agent.git
 cd deep-research-agent
 npm install
 
-# Set secrets
+# Set your OpenAI API key
 wrangler secret put OPENAI_API_KEY
-wrangler secret put RECRUITER_API_KEY
 
 # Deploy
 npm run deploy
