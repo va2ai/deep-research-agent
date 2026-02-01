@@ -90,6 +90,7 @@ export default {
       }
 
       // Resume/poll a background response until completion
+      // Use ?wait=false to return current status without polling
       const resumeMatch = url.pathname.match(/^\/research\/(resp_[a-zA-Z0-9_]+)$/);
       if (resumeMatch && request.method === "GET") {
         if (!validateApiKey(request, env)) {
@@ -97,7 +98,9 @@ export default {
         }
 
         const responseId = resumeMatch[1];
-        const result = await handleResumeResponse({ responseId, env });
+        const waitParam = url.searchParams.get("wait");
+        const shouldWait = waitParam !== "false"; // Default to true (poll until complete)
+        const result = await handleResumeResponse({ responseId, env, wait: shouldWait });
         return json(result, result.ok ? 200 : (result.status_code || 500));
       }
 
@@ -997,63 +1000,21 @@ async function runDeepResearchModel({ question, cfg, env }) {
 
   trace.push({ phase: "initial_response", status: resp.data.status, id: resp.data.id });
 
-  // Handle background mode - need to poll for completion
+  // Handle background mode - return immediately for client-side polling
+  // This avoids Cloudflare's subrequest limits (50 free tier, 1000 paid)
   if (cfg.background && (resp.data.status === "in_progress" || resp.data.status === "queued")) {
-    trace.push({ phase: "background", response_id: resp.data.id, status: "in_progress" });
+    trace.push({ phase: "background", response_id: resp.data.id, status: resp.data.status });
 
-    // Poll for completion (max 30 minutes for deep research)
-    const maxWait = 30 * 60 * 1000; // 30 minutes
-    const pollInterval = 5000; // 5 seconds
-    const startPoll = Date.now();
-
-    let result = resp.data;
-    let consecutiveErrors = 0;
-    const maxConsecutiveErrors = 3;
-
-    while ((result.status === "in_progress" || result.status === "queued") && (Date.now() - startPoll) < maxWait) {
-      await new Promise(r => setTimeout(r, pollInterval));
-
-      try {
-        const pollResp = await fetch(`https://api.openai.com/v1/responses/${result.id}`, {
-          headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` },
-        });
-
-        if (!pollResp.ok) {
-          const errData = await pollResp.json().catch(() => ({}));
-
-          // Handle rate limit - wait and retry
-          if (pollResp.status === 429) {
-            consecutiveErrors++;
-            const retryAfter = parseInt(pollResp.headers.get("retry-after") || "5", 10);
-            trace.push({ phase: "rate_limit", retryAfter, attempt: consecutiveErrors });
-
-            if (consecutiveErrors >= maxConsecutiveErrors) {
-              throw new Error(`Rate limit exceeded after ${maxConsecutiveErrors} retries`);
-            }
-
-            await new Promise(r => setTimeout(r, retryAfter * 1000));
-            continue;
-          }
-
-          throw new Error(`Polling error: ${JSON.stringify(errData)}`);
-        }
-
-        consecutiveErrors = 0; // Reset on success
-        result = await pollResp.json();
-        trace.push({ phase: "poll", status: result.status, elapsed: Math.round((Date.now() - startPoll) / 1000) });
-      } catch (err) {
-        if (err.message.includes("Rate limit")) throw err;
-        consecutiveErrors++;
-        if (consecutiveErrors >= maxConsecutiveErrors) throw err;
-        trace.push({ phase: "poll_error", error: err.message, attempt: consecutiveErrors });
-      }
-    }
-
-    if (result.status === "in_progress" || result.status === "queued") {
-      throw new Error("Deep research timed out after 30 minutes");
-    }
-
-    resp.data = result;
+    return {
+      ok: true,
+      status: resp.data.status,
+      message: "Deep research started. Poll GET /research/{response_id} to check status.",
+      response_id: resp.data.id,
+      startedAt,
+      mode: "deep_research",
+      config: cfg,
+      trace,
+    };
   }
 
   // Handle failed status
@@ -1097,7 +1058,7 @@ async function runDeepResearchModel({ question, cfg, env }) {
  * Resume polling for an existing background response.
  * Polls until the response is completed or failed.
  */
-async function handleResumeResponse({ responseId, env }) {
+async function handleResumeResponse({ responseId, env, wait = true }) {
   const startedAt = new Date().toISOString();
   const trace = [];
 
@@ -1118,6 +1079,19 @@ async function handleResumeResponse({ responseId, env }) {
 
   let result = await initialResp.json();
   trace.push({ phase: "resume", status: result.status, response_id: responseId });
+
+  // If wait=false, return current status immediately without polling
+  if (!wait && (result.status === "in_progress" || result.status === "queued")) {
+    return {
+      ok: true,
+      status: result.status,
+      message: "Research still in progress. Poll again or use wait=true to wait for completion.",
+      response_id: responseId,
+      startedAt,
+      mode: "deep_research",
+      trace,
+    };
+  }
 
   // If already completed or failed, return immediately
   if (result.status === "completed") {
@@ -1167,7 +1141,7 @@ async function handleResumeResponse({ responseId, env }) {
     trace.push({ phase: "polling", status: result.status });
 
     const maxWait = 30 * 60 * 1000; // 30 minutes
-    const pollInterval = 5000; // 5 seconds
+    const pollInterval = 30000; // 30 seconds (reduced from 5s to stay under Cloudflare subrequest limits)
     const startPoll = Date.now();
     let consecutiveErrors = 0;
     const maxConsecutiveErrors = 3;

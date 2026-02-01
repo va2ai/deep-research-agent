@@ -323,6 +323,8 @@
     let apiKey = localStorage.getItem('dra_api_key') || '';
     let currentResponseId = null;
     let isRunning = false;
+    let pollIntervalId = null;
+    const CLIENT_POLL_INTERVAL = 30000; // 30 seconds for client-side polling
 
     // Auth functions
     function checkAuth() {
@@ -368,63 +370,75 @@
       }
     }
 
-    async function checkResearchStatus() {
-      const savedResponseId = localStorage.getItem('last_response_id');
-      const savedQuestion = localStorage.getItem('last_question');
-
-      if (!savedResponseId) {
-        log('No saved response ID to check', 'warn');
-        return;
+    function stopPolling() {
+      if (pollIntervalId) {
+        clearInterval(pollIntervalId);
+        pollIntervalId = null;
+        log('Stopped automatic polling', 'info');
       }
+    }
 
-      clearLog();
-      log(`Checking status of response: ${savedResponseId}`, 'info');
-      if (savedQuestion) {
-        log(`Original question: "${savedQuestion.substring(0, 100)}${savedQuestion.length > 100 ? '...' : ''}"`, 'info');
-      }
+    function startClientPolling(responseId, question) {
+      stopPolling(); // Clear any existing interval
 
+      log(`Starting automatic polling every ${CLIENT_POLL_INTERVAL / 1000}s for response: ${responseId}`, 'info');
+
+      pollIntervalId = setInterval(async () => {
+        await pollResearchStatus(responseId, question, true);
+      }, CLIENT_POLL_INTERVAL);
+    }
+
+    async function pollResearchStatus(responseId, question, isAutoPoll = false) {
       const btn = document.getElementById('checkStatusBtn');
       const status = document.getElementById('status');
       const results = document.getElementById('results');
 
-      btn.disabled = true;
-      btn.textContent = 'Checking...';
-      status.className = 'status loading';
-      status.textContent = 'Checking research status and polling for completion...';
+      if (!isAutoPoll) {
+        btn.disabled = true;
+        btn.textContent = 'Checking...';
+      }
 
       try {
-        const startTime = Date.now();
-        const response = await fetch(`${API_BASE}/research/${savedResponseId}`, {
+        // Use ?wait=false to get immediate status without server-side polling
+        const response = await fetch(`${API_BASE}/research/${responseId}?wait=false`, {
           method: 'GET',
           headers: { 'X-API-Key': apiKey }
         });
 
-        log(`Response status: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+        log(`Poll response: ${response.status}`, response.ok ? 'info' : 'error');
 
         const data = await response.json();
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-
-        log(`Response received in ${elapsed}s`, 'success');
 
         if (response.status === 401) {
+          stopPolling();
           log('Authentication failed - invalid API key', 'error');
           localStorage.removeItem('dra_api_key');
           apiKey = '';
           document.getElementById('authError').textContent = 'Invalid password. Please try again.';
           checkAuth();
-          throw new Error('Invalid API key. Please re-enter your password.');
+          throw new Error('Invalid API key');
         }
 
-        if (!data.ok) {
-          log(`Status check result: ${data.error || data.status || 'unknown'}`, 'warn');
+        // Check if still in progress
+        if (data.status === 'in_progress' || data.status === 'queued') {
+          log(`Research still ${data.status}... polling again in ${CLIENT_POLL_INTERVAL / 1000}s`, 'info');
+          status.className = 'status loading';
+          status.innerHTML = `<span class="spinner"></span>Research ${data.status}... (auto-polling every ${CLIENT_POLL_INTERVAL / 1000}s)`;
+          return; // Continue polling
+        }
+
+        // Research completed or failed - stop polling
+        stopPolling();
+
+        if (data.status === 'failed' || !data.ok) {
+          log(`Research failed: ${data.error || 'Unknown error'}`, 'error');
           status.className = 'status error';
-          status.textContent = `Status: ${data.error || data.status || 'Failed'}`;
+          status.textContent = `Failed: ${data.error || 'Unknown error'}`;
+          isRunning = false;
+          document.getElementById('submitBtn').disabled = false;
+          document.getElementById('submitBtn').textContent = 'Run Research';
+          document.getElementById('cancelBtn').classList.remove('show');
 
-          if (data.status === 'in_progress' || data.status === 'queued') {
-            status.textContent += ' - Try again later or wait for polling to complete';
-          }
-
-          // Show raw response for debugging
           if (data.raw_response || data.trace) {
             results.className = 'results show';
             document.getElementById('rawResponse').textContent = JSON.stringify(data, null, 2);
@@ -435,10 +449,15 @@
         // Success - show results
         log(`Research complete! Answer: ${data.answer?.length || 0} chars`, 'success');
 
-        // Clear the saved response since it's now complete
+        // Clear saved response
         localStorage.removeItem('last_response_id');
         localStorage.removeItem('last_question');
         checkForSavedResponse();
+
+        isRunning = false;
+        document.getElementById('submitBtn').disabled = false;
+        document.getElementById('submitBtn').textContent = 'Run Research';
+        document.getElementById('cancelBtn').classList.remove('show');
 
         status.className = 'status success';
         status.textContent = 'Research complete!';
@@ -446,7 +465,7 @@
 
         // Answer
         document.getElementById('answer').innerHTML = renderMarkdown(data.answer) || '<p>No answer generated.</p>';
-        let timingText = `Completed in ${elapsed}s | Response ID: ${savedResponseId}`;
+        let timingText = `Response ID: ${responseId}`;
         timingText += ` | ${data.startedAt} - ${data.finishedAt}`;
         document.getElementById('timing').textContent = timingText;
 
@@ -471,12 +490,55 @@
         document.getElementById('rawResponse').textContent = JSON.stringify(data, null, 2);
 
       } catch (err) {
-        log(`ERROR: ${err.message}`, 'error');
-        status.className = 'status error';
-        status.textContent = `Error: ${err.message}`;
+        log(`Poll error: ${err.message}`, 'error');
+        // Don't stop polling on transient errors, but do stop on auth errors
+        if (err.message.includes('API key')) {
+          stopPolling();
+          status.className = 'status error';
+          status.textContent = err.message;
+        }
       } finally {
-        btn.disabled = false;
-        btn.textContent = 'Check Status';
+        if (!isAutoPoll) {
+          btn.disabled = false;
+          btn.textContent = 'Check Status';
+        }
+      }
+    }
+
+    async function checkResearchStatus() {
+      const savedResponseId = localStorage.getItem('last_response_id');
+      const savedQuestion = localStorage.getItem('last_question');
+
+      if (!savedResponseId) {
+        log('No saved response ID to check', 'warn');
+        return;
+      }
+
+      clearLog();
+      log(`Checking status of response: ${savedResponseId}`, 'info');
+      if (savedQuestion) {
+        log(`Original question: "${savedQuestion.substring(0, 100)}${savedQuestion.length > 100 ? '...' : ''}"`, 'info');
+      }
+
+      const status = document.getElementById('status');
+      status.className = 'status loading';
+      status.textContent = 'Checking research status...';
+
+      // Start polling for this response
+      await pollResearchStatus(savedResponseId, savedQuestion, false);
+
+      // If still in progress, start auto-polling
+      const data = await fetch(`${API_BASE}/research/${savedResponseId}?wait=false`, {
+        method: 'GET',
+        headers: { 'X-API-Key': apiKey }
+      }).then(r => r.json()).catch(() => ({}));
+
+      if (data.status === 'in_progress' || data.status === 'queued') {
+        isRunning = true;
+        document.getElementById('submitBtn').disabled = true;
+        document.getElementById('submitBtn').innerHTML = '<span class="spinner"></span>Waiting...';
+        document.getElementById('cancelBtn').classList.add('show');
+        startClientPolling(savedResponseId, savedQuestion);
       }
     }
 
@@ -485,6 +547,9 @@
         log('No response to cancel', 'warn');
         return;
       }
+
+      // Stop any client-side polling
+      stopPolling();
 
       log(`Cancelling response: ${currentResponseId}`, 'warn');
       const cancelBtn = document.getElementById('cancelBtn');
@@ -719,6 +784,28 @@
           const errMsg = data.error || data.message || 'Unknown error';
           log(`API Error: ${errMsg}`, 'error');
           throw new Error(errMsg);
+        }
+
+        // Handle in_progress response from background mode - start client-side polling
+        if (data.status === 'in_progress' || data.status === 'queued') {
+          log(`Deep research started in background mode`, 'success');
+          log(`Response ID: ${data.response_id}`, 'info');
+          log(`Status: ${data.status}`, 'info');
+          log(`Message: ${data.message}`, 'info');
+
+          currentResponseId = data.response_id;
+          localStorage.setItem('last_response_id', data.response_id);
+          localStorage.setItem('last_question', question);
+          checkForSavedResponse();
+
+          status.className = 'status loading';
+          status.innerHTML = `<span class="spinner"></span>Deep research in progress... (auto-polling every ${CLIENT_POLL_INTERVAL / 1000}s)`;
+
+          // Start client-side polling
+          startClientPolling(data.response_id, question);
+
+          // Don't reset button state - keep showing as running
+          return;
         }
 
         // Log trace summary
