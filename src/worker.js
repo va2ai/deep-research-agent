@@ -923,11 +923,31 @@ async function runDeepResearchModel({ question, cfg, env }) {
       trace.push({ phase: "poll", status: result.status, elapsed: Math.round((Date.now() - startPoll) / 1000) });
     }
 
-    if (result.status === "in_progress") {
+    if (result.status === "in_progress" || result.status === "queued") {
       throw new Error("Deep research timed out after 30 minutes");
     }
 
     resp.data = result;
+  }
+
+  // Handle failed status
+  if (resp.data.status === "failed") {
+    const errorInfo = resp.data.error || {};
+    trace.push({ phase: "failed", error: errorInfo });
+
+    return {
+      ok: false,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      question,
+      config: cfg,
+      error: errorInfo.message || "Deep research failed",
+      error_code: errorInfo.code || "unknown",
+      mode: "deep_research",
+      response_id: resp.data.id,
+      raw_response: resp.data,
+      trace,
+    };
   }
 
   const answer = extractText(resp.data);
