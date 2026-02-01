@@ -89,6 +89,18 @@ export default {
         }, statusResp.ok ? 200 : statusResp.status);
       }
 
+      // Resume/poll a background response until completion
+      const resumeMatch = url.pathname.match(/^\/research\/(resp_[a-zA-Z0-9_]+)$/);
+      if (resumeMatch && request.method === "GET") {
+        if (!validateApiKey(request, env)) {
+          return json({ error: "Unauthorized. Valid X-API-Key header required." }, 401);
+        }
+
+        const responseId = resumeMatch[1];
+        const result = await handleResumeResponse({ responseId, env });
+        return json(result, result.ok ? 200 : (result.status_code || 500));
+      }
+
       if (url.pathname === "/research" && request.method === "POST") {
         // Validate API key for research endpoint
         if (!validateApiKey(request, env)) {
@@ -224,6 +236,37 @@ function docsHtml() {
     <p>Health check endpoint.</p>
     <h3>Response</h3>
     <pre><code>{ "ok": true, "service": "deep-research-agent" }</code></pre>
+  </div>
+
+  <div class="endpoint">
+    <p><span class="method get">GET</span><span class="path">/research/:responseId</span></p>
+    <p>Resume polling for a background deep research job. Use this to check on jobs that failed due to rate limits or timeouts.</p>
+    <h3>Path Parameters</h3>
+    <table>
+      <tr><th>Parameter</th><th>Description</th></tr>
+      <tr><td><code>responseId</code></td><td>The response_id returned from the initial POST /research call (e.g., resp_abc123)</td></tr>
+    </table>
+    <h3>Authentication</h3>
+    <p>Requires <code>X-API-Key</code> header.</p>
+    <h3>Behavior</h3>
+    <ul style="margin-left: 1.5rem;">
+      <li>If the job is <strong>completed</strong>: Returns the full answer immediately</li>
+      <li>If the job is <strong>in_progress/queued</strong>: Polls until complete (max 30 min)</li>
+      <li>If the job <strong>failed</strong>: Returns error details</li>
+      <li>If <strong>rate limited</strong> during polling: Returns with instructions to retry later</li>
+    </ul>
+    <h3>Example</h3>
+    <pre><code>curl -H "X-API-Key: YOUR_KEY" \\
+  "https://deep-research-agent.vetapp.workers.dev/research/resp_abc123"</code></pre>
+    <h3>Response</h3>
+    <pre><code>{
+  "ok": true,
+  "answer": "...",
+  "response_id": "resp_abc123",
+  "mode": "deep_research",
+  "raw_response": { ... },
+  "trace": [ ... ]
+}</code></pre>
   </div>
 
   <div class="endpoint">
@@ -990,6 +1033,192 @@ async function runDeepResearchModel({ question, cfg, env }) {
     mode: "deep_research",
     response_id: resp.data.id,
     raw_response: resp.data,
+    trace,
+  };
+}
+
+/**
+ * Resume polling for an existing background response.
+ * Polls until the response is completed or failed.
+ */
+async function handleResumeResponse({ responseId, env }) {
+  const startedAt = new Date().toISOString();
+  const trace = [];
+
+  // Fetch current status
+  const initialResp = await fetch(`https://api.openai.com/v1/responses/${responseId}`, {
+    headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` },
+  });
+
+  if (!initialResp.ok) {
+    const err = await initialResp.json().catch(() => ({}));
+    return {
+      ok: false,
+      error: err.error?.message || `Failed to fetch response: ${initialResp.status}`,
+      response_id: responseId,
+      status_code: initialResp.status,
+    };
+  }
+
+  let result = await initialResp.json();
+  trace.push({ phase: "resume", status: result.status, response_id: responseId });
+
+  // If already completed or failed, return immediately
+  if (result.status === "completed") {
+    const answer = extractText(result);
+    return {
+      ok: true,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      answer,
+      mode: "deep_research",
+      response_id: responseId,
+      raw_response: result,
+      trace,
+    };
+  }
+
+  if (result.status === "failed") {
+    const errorInfo = result.error || {};
+    return {
+      ok: false,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      error: errorInfo.message || "Deep research failed",
+      error_code: errorInfo.code || "unknown",
+      mode: "deep_research",
+      response_id: responseId,
+      raw_response: result,
+      trace,
+    };
+  }
+
+  if (result.status === "cancelled") {
+    return {
+      ok: false,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      error: "Research was cancelled",
+      mode: "deep_research",
+      response_id: responseId,
+      raw_response: result,
+      trace,
+    };
+  }
+
+  // Poll for completion (max 30 minutes)
+  if (result.status === "in_progress" || result.status === "queued") {
+    trace.push({ phase: "polling", status: result.status });
+
+    const maxWait = 30 * 60 * 1000; // 30 minutes
+    const pollInterval = 5000; // 5 seconds
+    const startPoll = Date.now();
+    let consecutiveErrors = 0;
+    const maxConsecutiveErrors = 3;
+
+    while ((result.status === "in_progress" || result.status === "queued") && (Date.now() - startPoll) < maxWait) {
+      await new Promise(r => setTimeout(r, pollInterval));
+
+      try {
+        const pollResp = await fetch(`https://api.openai.com/v1/responses/${responseId}`, {
+          headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` },
+        });
+
+        if (!pollResp.ok) {
+          const errData = await pollResp.json().catch(() => ({}));
+
+          // Handle rate limit
+          if (pollResp.status === 429) {
+            consecutiveErrors++;
+            const retryAfter = parseInt(pollResp.headers.get("retry-after") || "10", 10);
+            trace.push({ phase: "rate_limit", retryAfter, attempt: consecutiveErrors });
+
+            if (consecutiveErrors >= maxConsecutiveErrors) {
+              return {
+                ok: false,
+                error: `Rate limit exceeded after ${maxConsecutiveErrors} retries. Use GET /research/${responseId} to resume later.`,
+                response_id: responseId,
+                status: result.status,
+                trace,
+              };
+            }
+
+            await new Promise(r => setTimeout(r, retryAfter * 1000));
+            continue;
+          }
+
+          throw new Error(`Polling error: ${JSON.stringify(errData)}`);
+        }
+
+        consecutiveErrors = 0;
+        result = await pollResp.json();
+        trace.push({ phase: "poll", status: result.status, elapsed: Math.round((Date.now() - startPoll) / 1000) });
+      } catch (err) {
+        consecutiveErrors++;
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          return {
+            ok: false,
+            error: err.message,
+            response_id: responseId,
+            status: result.status,
+            trace,
+          };
+        }
+        trace.push({ phase: "poll_error", error: err.message, attempt: consecutiveErrors });
+      }
+    }
+
+    // Check final status after polling
+    if (result.status === "in_progress" || result.status === "queued") {
+      return {
+        ok: false,
+        error: "Polling timed out after 30 minutes. Use GET /research/" + responseId + " to resume later.",
+        response_id: responseId,
+        status: result.status,
+        trace,
+      };
+    }
+  }
+
+  // Return based on final status
+  if (result.status === "completed") {
+    const answer = extractText(result);
+    trace.push({ phase: "complete", answerLen: answer.length });
+    return {
+      ok: true,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      answer,
+      mode: "deep_research",
+      response_id: responseId,
+      raw_response: result,
+      trace,
+    };
+  }
+
+  if (result.status === "failed") {
+    const errorInfo = result.error || {};
+    trace.push({ phase: "failed", error: errorInfo });
+    return {
+      ok: false,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      error: errorInfo.message || "Deep research failed",
+      error_code: errorInfo.code || "unknown",
+      mode: "deep_research",
+      response_id: responseId,
+      raw_response: result,
+      trace,
+    };
+  }
+
+  // Unknown status
+  return {
+    ok: false,
+    error: `Unknown status: ${result.status}`,
+    response_id: responseId,
+    status: result.status,
+    raw_response: result,
     trace,
   };
 }

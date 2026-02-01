@@ -26,6 +26,9 @@
     .cancel-btn { background: #dc2626; margin-top: 0.5rem; display: none; }
     .cancel-btn:hover { background: #b91c1c; }
     .cancel-btn.show { display: block; }
+    .check-status-btn { background: #059669; margin-top: 0.5rem; display: none; }
+    .check-status-btn:hover { background: #047857; }
+    .check-status-btn.show { display: block; }
     .status { margin-top: 1rem; padding: 1rem; border-radius: 8px; display: none; }
     .status.loading { display: block; background: #dbeafe; color: #1e40af; }
     .status.error { display: block; background: #fee2e2; color: #991b1b; }
@@ -275,6 +278,7 @@
 
     <button id="submitBtn" onclick="runResearch()">Run Research</button>
     <button id="cancelBtn" class="cancel-btn" onclick="cancelResearch()">Cancel Research</button>
+    <button id="checkStatusBtn" class="check-status-btn" onclick="checkResearchStatus()">Check Status</button>
 
     <div id="status" class="status"></div>
 
@@ -351,6 +355,130 @@
 
     // Run on page load
     checkAuth();
+    checkForSavedResponse();
+
+    function checkForSavedResponse() {
+      const savedResponseId = localStorage.getItem('last_response_id');
+      const checkStatusBtn = document.getElementById('checkStatusBtn');
+      if (savedResponseId && !isRunning) {
+        checkStatusBtn.classList.add('show');
+        checkStatusBtn.title = `Check status of: ${savedResponseId}`;
+      } else {
+        checkStatusBtn.classList.remove('show');
+      }
+    }
+
+    async function checkResearchStatus() {
+      const savedResponseId = localStorage.getItem('last_response_id');
+      const savedQuestion = localStorage.getItem('last_question');
+
+      if (!savedResponseId) {
+        log('No saved response ID to check', 'warn');
+        return;
+      }
+
+      clearLog();
+      log(`Checking status of response: ${savedResponseId}`, 'info');
+      if (savedQuestion) {
+        log(`Original question: "${savedQuestion.substring(0, 100)}${savedQuestion.length > 100 ? '...' : ''}"`, 'info');
+      }
+
+      const btn = document.getElementById('checkStatusBtn');
+      const status = document.getElementById('status');
+      const results = document.getElementById('results');
+
+      btn.disabled = true;
+      btn.textContent = 'Checking...';
+      status.className = 'status loading';
+      status.textContent = 'Checking research status and polling for completion...';
+
+      try {
+        const startTime = Date.now();
+        const response = await fetch(`${API_BASE}/research/${savedResponseId}`, {
+          method: 'GET',
+          headers: { 'X-API-Key': apiKey }
+        });
+
+        log(`Response status: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+
+        const data = await response.json();
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+        log(`Response received in ${elapsed}s`, 'success');
+
+        if (response.status === 401) {
+          log('Authentication failed - invalid API key', 'error');
+          localStorage.removeItem('dra_api_key');
+          apiKey = '';
+          document.getElementById('authError').textContent = 'Invalid password. Please try again.';
+          checkAuth();
+          throw new Error('Invalid API key. Please re-enter your password.');
+        }
+
+        if (!data.ok) {
+          log(`Status check result: ${data.error || data.status || 'unknown'}`, 'warn');
+          status.className = 'status error';
+          status.textContent = `Status: ${data.error || data.status || 'Failed'}`;
+
+          if (data.status === 'in_progress' || data.status === 'queued') {
+            status.textContent += ' - Try again later or wait for polling to complete';
+          }
+
+          // Show raw response for debugging
+          if (data.raw_response || data.trace) {
+            results.className = 'results show';
+            document.getElementById('rawResponse').textContent = JSON.stringify(data, null, 2);
+          }
+          return;
+        }
+
+        // Success - show results
+        log(`Research complete! Answer: ${data.answer?.length || 0} chars`, 'success');
+
+        // Clear the saved response since it's now complete
+        localStorage.removeItem('last_response_id');
+        localStorage.removeItem('last_question');
+        checkForSavedResponse();
+
+        status.className = 'status success';
+        status.textContent = 'Research complete!';
+        results.className = 'results show';
+
+        // Answer
+        document.getElementById('answer').innerHTML = renderMarkdown(data.answer) || '<p>No answer generated.</p>';
+        let timingText = `Completed in ${elapsed}s | Response ID: ${savedResponseId}`;
+        timingText += ` | ${data.startedAt} - ${data.finishedAt}`;
+        document.getElementById('timing').textContent = timingText;
+
+        // For deep research, we don't have fact_table/conflicts
+        document.getElementById('factTable').textContent = data.fact_table ?
+          JSON.stringify(data.fact_table, null, 2) : 'Not available for deep research mode.';
+        document.getElementById('conflicts').textContent = data.conflicts ?
+          JSON.stringify(data.conflicts, null, 2) : 'Not available for deep research mode.';
+
+        // Trace
+        const traceEl = document.getElementById('trace');
+        if (data.trace && data.trace.length > 0) {
+          traceEl.innerHTML = data.trace.map(t => {
+            let detail = JSON.stringify(t);
+            return `<div class="trace-item"><span class="trace-phase">[${t.phase}]</span> ${detail}</div>`;
+          }).join('');
+        } else {
+          traceEl.textContent = 'No trace available.';
+        }
+
+        // Raw response
+        document.getElementById('rawResponse').textContent = JSON.stringify(data, null, 2);
+
+      } catch (err) {
+        log(`ERROR: ${err.message}`, 'error');
+        status.className = 'status error';
+        status.textContent = `Error: ${err.message}`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Check Status';
+      }
+    }
 
     async function cancelResearch() {
       if (!currentResponseId) {
@@ -620,6 +748,8 @@
         // Store response_id if available
         if (data.response_id) {
           currentResponseId = data.response_id;
+          localStorage.setItem('last_response_id', data.response_id);
+          localStorage.setItem('last_question', question);
           log(`Response ID: ${data.response_id}`, 'info');
         }
 
@@ -696,7 +826,13 @@
       } catch (err) {
         log(`FATAL ERROR: ${err.message}`, 'error');
         status.className = 'status error';
-        status.textContent = `Error: ${err.message}`;
+        let errorMsg = `Error: ${err.message}`;
+        if (currentResponseId) {
+          errorMsg += ` (Response ID: ${currentResponseId} - use Check Status to resume)`;
+          localStorage.setItem('last_response_id', currentResponseId);
+          localStorage.setItem('last_question', question);
+        }
+        status.textContent = errorMsg;
         results.className = 'results';
       } finally {
         btn.disabled = false;

@@ -23,6 +23,9 @@ wrangler secret put OPENAI_API_KEY   # Set OpenAI API key
 - `GET /` or `/docs` - API documentation HTML
 - `GET /health` - Health check
 - `POST /research` - Main research endpoint
+- `GET /research/:responseId` - Resume/poll a background deep research job until completion
+- `GET /status/:responseId` - Get current status of a response (no polling)
+- `POST /cancel/:responseId` - Cancel an in-progress response
 
 ### Research Pipeline
 The `deepResearchAgent` function orchestrates a 5-stage pipeline:
@@ -57,6 +60,6 @@ X-API-Key: <RECRUITER_API_KEY value>
 The test.html UI prompts for this password and stores it in localStorage.
 
 ## Files
-- `src/worker.js` - Main worker code (~800 lines)
+- `src/worker.js` - Main worker code (~1200 lines)
 - `wrangler.toml` - Cloudflare Worker configuration
-- `test.html` - Browser-based test UI with all options exposed
+- `test.html` - Browser-based test UI with all options exposed (includes Check Status button for resuming failed jobs)
