@@ -770,7 +770,7 @@ async function webSearch({ query, cfg, env }) {
   // NOTE: This relies on the built-in "web_search" tool via Responses.
   const payload = {
     model: cfg.model,
-    input: `Search for: ${query}`,
+    input: `Search for: ${query}\n\nAfter searching, provide a structured summary of what you found. For each piece of information, include the source URL.`,
     tools: buildTools(cfg),
     ...buildPayloadOptions(cfg),
   };
@@ -778,11 +778,67 @@ async function webSearch({ query, cfg, env }) {
   const resp = await openaiResponsesCreate({ env, payload, maxRetries: cfg.maxRetries });
   if (!resp.ok) throw new Error(`OpenAI web_search error: ${JSON.stringify(resp.error)}`);
 
+  // Extract both text response and web search results
+  const textResponse = extractText(resp.data);
+  const webResults = extractWebSearchResults(resp.data);
+
+  // Combine text response with structured web search results
+  let snippetsText = textResponse;
+  if (webResults.length > 0) {
+    snippetsText += "\n\n--- Web Search Results ---\n";
+    for (const result of webResults) {
+      snippetsText += `\nSource: ${result.url}\nTitle: ${result.title || 'Unknown'}\nSnippet: ${result.snippet || result.text || ''}\n`;
+    }
+  }
+
   return {
     response_id: resp.data.id || null,
-    snippetsText: extractText(resp.data),
+    snippetsText,
     raw: resp.data,
   };
+}
+
+/**
+ * Extracts web search results from Responses API output.
+ * Looks for web_search_call items in the output array.
+ */
+function extractWebSearchResults(respData) {
+  const results = [];
+  if (!respData || !Array.isArray(respData.output)) return results;
+
+  for (const item of respData.output) {
+    // Check for web_search_call type
+    if (item.type === "web_search_call" && Array.isArray(item.results)) {
+      for (const r of item.results) {
+        if (r.url) {
+          results.push({
+            url: r.url,
+            title: r.title || null,
+            snippet: r.snippet || r.text || null,
+          });
+        }
+      }
+    }
+
+    // Also check content array for search results
+    if (Array.isArray(item.content)) {
+      for (const c of item.content) {
+        if (c.type === "web_search_call" && Array.isArray(c.results)) {
+          for (const r of c.results) {
+            if (r.url) {
+              results.push({
+                url: r.url,
+                title: r.title || null,
+                snippet: r.snippet || r.text || null,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return results;
 }
 
 async function extractFacts({ question, snippets, cfg, env }) {
@@ -1251,11 +1307,12 @@ async function deepResearchAgent({ question, cfg, env }) {
     const q = queries[(round - 1) % Math.max(1, queries.length)];
 
     const search = await webSearch({ query: q, cfg, env });
-    trace.push({ phase: "search", round, query: q, response_id: search.response_id });
+    trace.push({ phase: "search", round, query: q, response_id: search.response_id, snippetsLen: search.snippetsText?.length || 0 });
 
     const extracted = await extractFacts({ question, snippets: search.snippetsText, cfg, env });
     let roundFacts = extracted.facts || [];
     const roundConflicts = extracted.conflicts || [];
+    const rawFactCount = roundFacts.length;
 
     // Normalize + score + optional domain filter
     roundFacts = roundFacts
@@ -1291,6 +1348,8 @@ async function deepResearchAgent({ question, cfg, env }) {
     trace.push({
       phase: "extract",
       round,
+      rawFactCount,
+      filteredFactCount: roundFacts.length,
       newFacts,
       totalFacts: allFacts.length,
       distinctSources: seenUrls.size,
