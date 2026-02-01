@@ -45,8 +45,16 @@ The `deepResearchAgent` function orchestrates a 5-stage pipeline:
 - Deep Research: o3-deep-research, o4-mini-deep-research (use `background: true`, supports `codeInterpreter`)
 
 ## Environment Variables
-- `OPENAI_API_KEY` (secret) - Required
+- `OPENAI_API_KEY` (secret) - Required for OpenAI API access
+- `RECRUITER_API_KEY` (secret) - Required for /research endpoint access (share with recruiters)
 - `OPENAI_MODEL` (var) - Default model, set in wrangler.toml
+
+## Authentication
+The `/research` endpoint is protected with an API key. Clients must include:
+```
+X-API-Key: <RECRUITER_API_KEY value>
+```
+The test.html UI prompts for this password and stores it in localStorage.
 
 ## Files
 - `src/worker.js` - Main worker code (~800 lines)
