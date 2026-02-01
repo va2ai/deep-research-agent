@@ -41,6 +41,54 @@ export default {
         });
       }
 
+      // Cancel a background response
+      const cancelMatch = url.pathname.match(/^\/cancel\/(.+)$/);
+      if (cancelMatch && request.method === "POST") {
+        if (!validateApiKey(request, env)) {
+          return json({ error: "Unauthorized. Valid X-API-Key header required." }, 401);
+        }
+
+        const responseId = cancelMatch[1];
+        const cancelResp = await fetch(`https://api.openai.com/v1/responses/${responseId}/cancel`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+        });
+
+        const cancelData = await cancelResp.json();
+        return json({
+          ok: cancelResp.ok,
+          response_id: responseId,
+          status: cancelData.status,
+          data: cancelData,
+        }, cancelResp.ok ? 200 : cancelResp.status);
+      }
+
+      // Get status of a background response
+      const statusMatch = url.pathname.match(/^\/status\/(.+)$/);
+      if (statusMatch && request.method === "GET") {
+        if (!validateApiKey(request, env)) {
+          return json({ error: "Unauthorized. Valid X-API-Key header required." }, 401);
+        }
+
+        const responseId = statusMatch[1];
+        const statusResp = await fetch(`https://api.openai.com/v1/responses/${responseId}`, {
+          headers: {
+            Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+          },
+        });
+
+        const statusData = await statusResp.json();
+        return json({
+          ok: statusResp.ok,
+          response_id: responseId,
+          status: statusData.status,
+          data: statusData,
+        }, statusResp.ok ? 200 : statusResp.status);
+      }
+
       if (url.pathname === "/research" && request.method === "POST") {
         // Validate API key for research endpoint
         if (!validateApiKey(request, env)) {
@@ -108,8 +156,8 @@ export default {
     } catch (err) {
       return json(
         {
-          error: "Unhandled error",
-          message: err?.message || String(err),
+          error: err?.message || String(err),
+          stack: err?.stack || null,
         },
         500
       );
@@ -430,9 +478,11 @@ function normalizeUserLocation(v) {
 }
 
 function buildWebSearchTool(cfg, contextSize) {
+  // Deep research models only support "medium" context size
+  const size = isDeepResearchModel(cfg.model) ? "medium" : (contextSize || cfg.webContextSize || "medium");
   const tool = {
     type: "web_search_preview",
-    search_context_size: contextSize || cfg.webContextSize || "medium",
+    search_context_size: size,
   };
   if (cfg.userLocation) {
     tool.user_location = cfg.userLocation;
@@ -823,7 +873,86 @@ Return VALID JSON ONLY:
   return safeJsonParse(sliceJsonBlock(text)) || { ok: false, issues: ["Validator JSON parse failed"], revised_answer: draft };
 }
 
+async function runDeepResearchModel({ question, cfg, env }) {
+  // Deep research models handle everything internally - just send the question
+  const startedAt = new Date().toISOString();
+  const trace = [];
+
+  const prompt = `Research and answer this question thoroughly with citations:\n\n${question}`;
+
+  const payload = {
+    model: cfg.model,
+    input: prompt,
+    tools: buildTools(cfg),
+    ...buildPayloadOptions(cfg),
+  };
+
+  trace.push({ phase: "request", model: cfg.model, background: cfg.background });
+
+  const resp = await openaiResponsesCreate({ env, payload });
+
+  if (!resp.ok) {
+    throw new Error(`OpenAI deep research error: ${JSON.stringify(resp.error)}`);
+  }
+
+  trace.push({ phase: "initial_response", status: resp.data.status, id: resp.data.id });
+
+  // Handle background mode - need to poll for completion
+  if (cfg.background && (resp.data.status === "in_progress" || resp.data.status === "queued")) {
+    trace.push({ phase: "background", response_id: resp.data.id, status: "in_progress" });
+
+    // Poll for completion (max 30 minutes for deep research)
+    const maxWait = 30 * 60 * 1000; // 30 minutes
+    const pollInterval = 5000; // 5 seconds
+    const startPoll = Date.now();
+
+    let result = resp.data;
+    while ((result.status === "in_progress" || result.status === "queued") && (Date.now() - startPoll) < maxWait) {
+      await new Promise(r => setTimeout(r, pollInterval));
+
+      const pollResp = await fetch(`https://api.openai.com/v1/responses/${result.id}`, {
+        headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` },
+      });
+
+      if (!pollResp.ok) {
+        const errText = await pollResp.text();
+        throw new Error(`Polling error: ${errText}`);
+      }
+
+      result = await pollResp.json();
+      trace.push({ phase: "poll", status: result.status, elapsed: Math.round((Date.now() - startPoll) / 1000) });
+    }
+
+    if (result.status === "in_progress") {
+      throw new Error("Deep research timed out after 30 minutes");
+    }
+
+    resp.data = result;
+  }
+
+  const answer = extractText(resp.data);
+  trace.push({ phase: "complete", answerLen: answer.length, finalStatus: resp.data.status });
+
+  return {
+    ok: true,
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    question,
+    config: cfg,
+    answer,
+    mode: "deep_research",
+    response_id: resp.data.id,
+    raw_response: resp.data,
+    trace,
+  };
+}
+
 async function deepResearchAgent({ question, cfg, env }) {
+  // Use direct deep research mode for deep research models
+  if (isDeepResearchModel(cfg.model)) {
+    return runDeepResearchModel({ question, cfg, env });
+  }
+
   const trace = [];
   const startedAt = new Date().toISOString();
 

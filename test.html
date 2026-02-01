@@ -23,6 +23,9 @@
     button { background: #3b82f6; color: white; border: none; padding: 1rem 2rem; font-size: 1rem; font-weight: 600; border-radius: 8px; cursor: pointer; width: 100%; transition: background 0.2s; }
     button:hover { background: #2563eb; }
     button:disabled { background: #9ca3af; cursor: not-allowed; }
+    .cancel-btn { background: #dc2626; margin-top: 0.5rem; display: none; }
+    .cancel-btn:hover { background: #b91c1c; }
+    .cancel-btn.show { display: block; }
     .status { margin-top: 1rem; padding: 1rem; border-radius: 8px; display: none; }
     .status.loading { display: block; background: #dbeafe; color: #1e40af; }
     .status.error { display: block; background: #fee2e2; color: #991b1b; }
@@ -31,7 +34,22 @@
     .results.show { display: block; }
     .result-section { background: #f9fafb; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; }
     .result-section h3 { color: #1f2937; margin-bottom: 1rem; border-bottom: 2px solid #e5e7eb; padding-bottom: 0.5rem; }
-    .answer { font-size: 1.1rem; line-height: 1.8; white-space: pre-wrap; }
+    .answer { font-size: 1.05rem; line-height: 1.8; }
+    .answer h1, .answer h2, .answer h3, .answer h4 { margin: 1.5rem 0 0.75rem; color: #1a1a2e; }
+    .answer h1 { font-size: 1.5rem; border-bottom: 2px solid #e5e7eb; padding-bottom: 0.5rem; }
+    .answer h2 { font-size: 1.3rem; }
+    .answer h3 { font-size: 1.15rem; }
+    .answer p { margin-bottom: 1rem; }
+    .answer ul, .answer ol { margin: 1rem 0; padding-left: 1.5rem; }
+    .answer li { margin-bottom: 0.5rem; }
+    .answer strong { color: #1f2937; }
+    .answer em { font-style: italic; }
+    .answer a { color: #3b82f6; text-decoration: none; }
+    .answer a:hover { text-decoration: underline; }
+    .answer code { background: #f3f4f6; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.9em; }
+    .answer pre { background: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 8px; overflow-x: auto; margin: 1rem 0; }
+    .answer pre code { background: none; padding: 0; }
+    .answer blockquote { border-left: 4px solid #3b82f6; margin: 1rem 0; padding-left: 1rem; color: #4b5563; }
     .fact-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
     .fact-table th, .fact-table td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
     .fact-table th { background: #f3f4f6; font-weight: 600; }
@@ -256,6 +274,7 @@
     </div>
 
     <button id="submitBtn" onclick="runResearch()">Run Research</button>
+    <button id="cancelBtn" class="cancel-btn" onclick="cancelResearch()">Cancel Research</button>
 
     <div id="status" class="status"></div>
 
@@ -294,9 +313,12 @@
   </div>
 
   <script>
-    const API_URL = 'https://deep-research-agent.vetapp.workers.dev/research';
+    const API_BASE = 'https://deep-research-agent.vetapp.workers.dev';
+    const API_URL = API_BASE + '/research';
     let debugEnabled = true;
     let apiKey = localStorage.getItem('dra_api_key') || '';
+    let currentResponseId = null;
+    let isRunning = false;
 
     // Auth functions
     function checkAuth() {
@@ -329,6 +351,43 @@
 
     // Run on page load
     checkAuth();
+
+    async function cancelResearch() {
+      if (!currentResponseId) {
+        log('No response to cancel', 'warn');
+        return;
+      }
+
+      log(`Cancelling response: ${currentResponseId}`, 'warn');
+      const cancelBtn = document.getElementById('cancelBtn');
+      cancelBtn.disabled = true;
+      cancelBtn.textContent = 'Cancelling...';
+
+      try {
+        const resp = await fetch(`${API_BASE}/cancel/${currentResponseId}`, {
+          method: 'POST',
+          headers: { 'X-API-Key': apiKey }
+        });
+
+        const data = await resp.json();
+        if (data.ok) {
+          log(`Response cancelled. Status: ${data.status}`, 'success');
+          document.getElementById('status').className = 'status error';
+          document.getElementById('status').textContent = 'Research cancelled.';
+        } else {
+          log(`Cancel failed: ${JSON.stringify(data)}`, 'error');
+        }
+      } catch (err) {
+        log(`Cancel error: ${err.message}`, 'error');
+      }
+
+      isRunning = false;
+      cancelBtn.classList.remove('show');
+      cancelBtn.disabled = false;
+      cancelBtn.textContent = 'Cancel Research';
+      document.getElementById('submitBtn').disabled = false;
+      document.getElementById('submitBtn').textContent = 'Run Research';
+    }
 
     function log(message, type = 'info') {
       if (!debugEnabled) return;
@@ -464,6 +523,14 @@
       btn.disabled = true;
       btn.innerHTML = '<span class="spinner"></span>Researching...';
       status.className = 'status loading';
+      isRunning = true;
+      currentResponseId = null;
+
+      // Show cancel button for deep research
+      const cancelBtn = document.getElementById('cancelBtn');
+      if (isDeepResearch) {
+        cancelBtn.classList.add('show');
+      }
 
       // Dynamic status message based on options
       let statusMsg = 'Running research';
@@ -550,6 +617,12 @@
           }
         }
 
+        // Store response_id if available
+        if (data.response_id) {
+          currentResponseId = data.response_id;
+          log(`Response ID: ${data.response_id}`, 'info');
+        }
+
         log(`Final answer: ${data.answer?.length || 0} chars`, 'success');
         log(`Facts collected: ${data.fact_table?.length || 0}`, 'success');
         log(`Conflicts detected: ${data.conflicts?.length || 0}`, data.conflicts?.length > 0 ? 'warn' : 'success');
@@ -559,8 +632,8 @@
         status.textContent = 'Research complete!';
         results.className = 'results show';
 
-        // Answer
-        document.getElementById('answer').textContent = data.answer || 'No answer generated.';
+        // Answer (render markdown)
+        document.getElementById('answer').innerHTML = renderMarkdown(data.answer) || '<p>No answer generated.</p>';
         const configInfo = data.config || {};
         let timingText = `Completed in ${elapsed}s | Model: ${configInfo.model || 'unknown'}`;
         if (configInfo.temperature !== null) timingText += ` | Temp: ${configInfo.temperature}`;
@@ -628,12 +701,60 @@
       } finally {
         btn.disabled = false;
         btn.textContent = 'Run Research';
+        isRunning = false;
+        document.getElementById('cancelBtn').classList.remove('show');
       }
     }
 
     function escapeHtml(str) {
       if (!str) return '';
       return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function renderMarkdown(text) {
+      if (!text) return '';
+      let html = escapeHtml(text);
+
+      // Code blocks (must be before inline code)
+      html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+
+      // Headers
+      html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+      html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+      html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+      html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+      // Bold and italic
+      html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+      html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+      // Inline code
+      html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+      // Links
+      html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+      // Blockquotes
+      html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+
+      // Unordered lists
+      html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+      html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+
+      // Paragraphs (double newlines)
+      html = html.replace(/\n\n+/g, '</p><p>');
+      html = '<p>' + html + '</p>';
+
+      // Clean up empty paragraphs and fix nesting
+      html = html.replace(/<p>\s*<(h[1-4]|ul|pre|blockquote)/g, '<$1');
+      html = html.replace(/<\/(h[1-4]|ul|pre|blockquote)>\s*<\/p>/g, '</$1>');
+      html = html.replace(/<p>\s*<\/p>/g, '');
+
+      // Single line breaks
+      html = html.replace(/\n/g, '<br>');
+
+      return html;
     }
   </script>
 </body>
