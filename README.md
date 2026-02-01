@@ -11,6 +11,7 @@ Ask a question, get a research-analyst-level answer with sources:
 ```bash
 curl -X POST "https://deep-research-agent.vetapp.workers.dev/research" \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_API_KEY" \
   -d '{"question": "What is the OpenAI Responses API?"}'
 ```
 
@@ -29,6 +30,16 @@ curl -X POST "https://deep-research-agent.vetapp.workers.dev/research" \
 | **Fact Validation** | Verifies all claims in the final answer are supported by extracted evidence |
 | **Conflict Detection** | Identifies when sources contradict each other |
 | **Deep Research Mode** | Supports OpenAI's o3-deep-research for 100+ source comprehensive reports |
+| **API Key Protection** | Secure access control for the research endpoint |
+
+## Authentication
+
+The `/research` endpoint requires an API key passed via the `X-API-Key` header. Public endpoints (`/docs`, `/health`) remain accessible without authentication.
+
+```bash
+# Set the recruiter API key secret
+wrangler secret put RECRUITER_API_KEY
+```
 
 ## Tech Stack
 
@@ -71,12 +82,13 @@ Request → Planner → Web Search (multi-round) → Fact Extraction → Synthes
 
 ```bash
 # Clone and install
-git clone https://github.com/YOUR_USERNAME/deep-research-agent.git
+git clone https://github.com/va2ai/deep-research-agent.git
 cd deep-research-agent
 npm install
 
-# Set your OpenAI API key
+# Set secrets
 wrangler secret put OPENAI_API_KEY
+wrangler secret put RECRUITER_API_KEY
 
 # Deploy
 npm run deploy
@@ -85,6 +97,7 @@ npm run deploy
 ## Test Interface
 
 Open `test.html` in a browser for a full-featured testing UI with:
+- Password-protected access (uses your API key)
 - Model selection (20+ models including deep research)
 - All configurable parameters
 - Real-time debug logs
