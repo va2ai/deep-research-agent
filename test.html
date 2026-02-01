@@ -64,12 +64,36 @@
     details { margin-bottom: 1rem; }
     summary { cursor: pointer; font-weight: 600; color: #374151; padding: 0.5rem 0; }
     .section-divider { border-top: 1px solid #e5e7eb; margin: 1rem 0; padding-top: 1rem; }
+    /* Auth Modal */
+    .auth-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+    .auth-modal.hidden { display: none; }
+    .auth-box { background: #fff; padding: 2rem; border-radius: 12px; max-width: 400px; width: 90%; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
+    .auth-box h2 { margin-bottom: 0.5rem; color: #1a1a2e; }
+    .auth-box p { color: #6b7280; margin-bottom: 1rem; font-size: 0.9rem; }
+    .auth-box input { margin-bottom: 1rem; text-align: center; font-size: 1rem; }
+    .auth-box button { background: #3b82f6; }
+    .auth-error { color: #dc2626; font-size: 0.85rem; margin-top: 0.5rem; min-height: 1.2rem; }
+    .logout-btn { background: #6b7280; padding: 0.5rem 1rem; font-size: 0.85rem; width: auto; margin-left: auto; display: block; margin-bottom: 1rem; }
+    .logout-btn:hover { background: #4b5563; }
   </style>
 </head>
 <body>
   <h1>Deep Research Agent Test</h1>
 
+  <!-- Password Modal -->
+  <div id="authModal" class="auth-modal">
+    <div class="auth-box">
+      <h2>Authentication Required</h2>
+      <p>Enter the access password to use this demo.</p>
+      <input type="password" id="authPassword" placeholder="Access password" onkeypress="if(event.key==='Enter')submitAuth()">
+      <button onclick="submitAuth()">Access Demo</button>
+      <p id="authError" class="auth-error"></p>
+    </div>
+  </div>
+
   <div class="container">
+    <button class="logout-btn" onclick="logout()">Logout</button>
+
     <label for="question">Research Question</label>
     <textarea id="question" placeholder="Enter your research question...">What is the OpenAI Responses API and how does it differ from the Chat Completions API?</textarea>
 
@@ -272,6 +296,39 @@
   <script>
     const API_URL = 'https://deep-research-agent.vetapp.workers.dev/research';
     let debugEnabled = true;
+    let apiKey = localStorage.getItem('dra_api_key') || '';
+
+    // Auth functions
+    function checkAuth() {
+      const modal = document.getElementById('authModal');
+      if (apiKey) {
+        modal.classList.add('hidden');
+      } else {
+        modal.classList.remove('hidden');
+      }
+    }
+
+    function submitAuth() {
+      const password = document.getElementById('authPassword').value.trim();
+      const errorEl = document.getElementById('authError');
+      if (!password) {
+        errorEl.textContent = 'Please enter a password.';
+        return;
+      }
+      apiKey = password;
+      localStorage.setItem('dra_api_key', password);
+      document.getElementById('authModal').classList.add('hidden');
+      errorEl.textContent = '';
+    }
+
+    function logout() {
+      apiKey = '';
+      localStorage.removeItem('dra_api_key');
+      checkAuth();
+    }
+
+    // Run on page load
+    checkAuth();
 
     function log(message, type = 'info') {
       if (!debugEnabled) return;
@@ -439,7 +496,10 @@
 
         const response = await fetch(API_URL, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey
+          },
           body: JSON.stringify(requestBody)
         });
 
@@ -449,6 +509,16 @@
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
         log(`Response received in ${elapsed}s`, 'success');
+
+        // Handle auth error
+        if (response.status === 401) {
+          log('Authentication failed - invalid API key', 'error');
+          localStorage.removeItem('dra_api_key');
+          apiKey = '';
+          document.getElementById('authError').textContent = 'Invalid password. Please try again.';
+          checkAuth();
+          throw new Error('Invalid API key. Please re-enter your password.');
+        }
 
         if (!response.ok || data.error) {
           const errMsg = data.error || data.message || 'Unknown error';

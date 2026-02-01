@@ -42,6 +42,11 @@ export default {
       }
 
       if (url.pathname === "/research" && request.method === "POST") {
+        // Validate API key for research endpoint
+        if (!validateApiKey(request, env)) {
+          return json({ error: "Unauthorized. Valid X-API-Key header required." }, 401);
+        }
+
         const body = await safeJson(request);
         if (!body || typeof body.question !== "string" || !body.question.trim()) {
           return json({ error: "Missing required field: question (string)" }, 400);
@@ -113,8 +118,17 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key",
   };
+}
+
+function validateApiKey(request, env) {
+  const apiKey = request.headers.get("X-API-Key");
+  if (!env.RECRUITER_API_KEY) {
+    // If no key is configured, allow all requests (dev mode)
+    return true;
+  }
+  return apiKey === env.RECRUITER_API_KEY;
 }
 
 function docsHtml() {
@@ -219,9 +233,13 @@ function docsHtml() {
       <tr><td><code>timezone</code></td><td>string</td><td>IANA timezone (e.g., "America/Los_Angeles")</td></tr>
     </table>
 
+    <h3>Authentication</h3>
+    <p>This endpoint requires an API key. Include it in the <code>X-API-Key</code> header.</p>
+
     <h3>Example Request</h3>
     <pre><code>curl -X POST "https://deep-research-agent.vetapp.workers.dev/research" \\
   -H "Content-Type: application/json" \\
+  -H "X-API-Key: YOUR_API_KEY" \\
   -d '{
     "question": "What is the OpenAI Responses API?",
     "options": {

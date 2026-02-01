@@ -3,3 +3,16 @@ node_modules/
 .dev.vars
 *.log
 .DS_Store
+package-lock.json
+.claude/
+.vscode/
+.idea/
+.bash_profile
+.bashrc
+.profile
+.zprofile
+.zshrc
+.gitconfig
+.gitmodules
+.mcp.json
+.ripgreprc
