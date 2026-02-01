@@ -86,6 +86,9 @@ export default {
           codeInterpreter: options.codeInterpreter === true,
           maxToolCalls: options.maxToolCalls ? clampInt(options.maxToolCalls, 1, 1000) : null,
           reasoningSummary: normalizeReasoningSummary(options.reasoningSummary),
+
+          // Retry settings for API calls
+          maxRetries: clampInt(options.maxRetries ?? 3, 0, 5),
         };
 
         if (!env.OPENAI_API_KEY) {
@@ -196,6 +199,7 @@ function docsHtml() {
       <tr><td><code>reasoning_effort</code></td><td>string</td><td>null</td><td>For o1/o3 models: "low", "medium", or "high"</td></tr>
       <tr><td><code>instructions</code></td><td>string</td><td>null</td><td>System instructions/prompt</td></tr>
       <tr><td><code>store</code></td><td>boolean</td><td>true</td><td>Whether to store response in OpenAI</td></tr>
+      <tr><td><code>maxRetries</code></td><td>number</td><td>3</td><td>Max retry attempts for failed API calls (0-5)</td></tr>
     </table>
 
     <h3>Deep Research Options (o3-deep-research, o4-mini-deep-research)</h3>
@@ -348,6 +352,73 @@ function isDeepResearchModel(model) {
   return model && model.includes("deep-research");
 }
 
+/**
+ * Retry with exponential backoff for transient failures
+ * @param {Function} fn - Async function to retry
+ * @param {Object} options - Retry options
+ * @param {number} options.maxRetries - Max retry attempts (default: 3)
+ * @param {number} options.baseDelayMs - Base delay in ms (default: 1000)
+ * @param {Function} options.shouldRetry - Function to check if error is retryable
+ */
+async function retryWithBackoff(fn, options = {}) {
+  const maxRetries = options.maxRetries ?? 3;
+  const baseDelayMs = options.baseDelayMs ?? 1000;
+  const shouldRetry = options.shouldRetry ?? defaultShouldRetry;
+
+  let lastError;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await fn();
+      // For OpenAI responses, check if it's a retryable error response
+      if (result && !result.ok && shouldRetry(result)) {
+        lastError = result;
+        if (attempt < maxRetries) {
+          const delay = baseDelayMs * Math.pow(2, attempt);
+          await sleep(delay);
+          continue;
+        }
+      }
+      return result;
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxRetries && shouldRetry({ error: err })) {
+        const delay = baseDelayMs * Math.pow(2, attempt);
+        await sleep(delay);
+        continue;
+      }
+      throw err;
+    }
+  }
+  return lastError;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Determines if an error/response should trigger a retry
+ * Retries on: rate limits (429), server errors (5xx), network errors
+ */
+function defaultShouldRetry(result) {
+  if (!result) return false;
+
+  // HTTP status-based retry
+  const status = result.status;
+  if (status === 429) return true; // Rate limited
+  if (status >= 500 && status < 600) return true; // Server errors
+
+  // Network/fetch errors
+  if (result.error instanceof Error) {
+    const msg = result.error.message?.toLowerCase() || '';
+    if (msg.includes('network') || msg.includes('timeout') || msg.includes('econnreset')) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function normalizeUserLocation(v) {
   if (!v || typeof v !== "object") return null;
   const loc = { type: "approximate" };
@@ -487,34 +558,40 @@ function urlAllowedByForceDomains(url, forceDomains) {
 
 /**
  * OpenAI Responses API call for Workers (fetch-based)
+ * Includes automatic retry with exponential backoff for transient failures
  */
-async function openaiResponsesCreate({ env, payload }) {
-  const res = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
+async function openaiResponsesCreate({ env, payload, maxRetries = 3 }) {
+  return retryWithBackoff(
+    async () => {
+      const res = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const text = await res.text();
+      let data = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        // keep raw
+      }
+
+      if (!res.ok) {
+        return {
+          ok: false,
+          status: res.status,
+          error: data || { raw: text },
+        };
+      }
+
+      return { ok: true, status: res.status, data };
     },
-    body: JSON.stringify(payload),
-  });
-
-  const text = await res.text();
-  let data = null;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    // keep raw
-  }
-
-  if (!res.ok) {
-    return {
-      ok: false,
-      status: res.status,
-      error: data || { raw: text },
-    };
-  }
-
-  return { ok: true, status: res.status, data };
+    { maxRetries }
+  );
 }
 
 /**
@@ -580,7 +657,7 @@ Rules:
     ...buildPayloadOptions(cfg),
   };
 
-  const resp = await openaiResponsesCreate({ env, payload });
+  const resp = await openaiResponsesCreate({ env, payload, maxRetries: cfg.maxRetries });
   if (!resp.ok) throw new Error(`OpenAI planner error: ${JSON.stringify(resp.error)}`);
 
   const text = extractText(resp.data);
@@ -604,7 +681,7 @@ async function webSearch({ query, cfg, env }) {
     ...buildPayloadOptions(cfg),
   };
 
-  const resp = await openaiResponsesCreate({ env, payload });
+  const resp = await openaiResponsesCreate({ env, payload, maxRetries: cfg.maxRetries });
   if (!resp.ok) throw new Error(`OpenAI web_search error: ${JSON.stringify(resp.error)}`);
 
   return {
@@ -660,7 +737,7 @@ Rules:
     ...buildPayloadOptions(cfg),
   };
 
-  const resp = await openaiResponsesCreate({ env, payload });
+  const resp = await openaiResponsesCreate({ env, payload, maxRetries: cfg.maxRetries });
   if (!resp.ok) throw new Error(`OpenAI extractFacts error: ${JSON.stringify(resp.error)}`);
 
   const text = extractText(resp.data);
@@ -698,7 +775,7 @@ Write the best possible answer:
     ...buildPayloadOptions(cfg),
   };
 
-  const resp = await openaiResponsesCreate({ env, payload });
+  const resp = await openaiResponsesCreate({ env, payload, maxRetries: cfg.maxRetries });
   if (!resp.ok) throw new Error(`OpenAI synthesize error: ${JSON.stringify(resp.error)}`);
 
   return extractText(resp.data);
@@ -739,7 +816,7 @@ Return VALID JSON ONLY:
     ...buildPayloadOptions(cfg),
   };
 
-  const resp = await openaiResponsesCreate({ env, payload });
+  const resp = await openaiResponsesCreate({ env, payload, maxRetries: cfg.maxRetries });
   if (!resp.ok) throw new Error(`OpenAI validate error: ${JSON.stringify(resp.error)}`);
 
   const text = extractText(resp.data);
