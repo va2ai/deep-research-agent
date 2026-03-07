@@ -1,8 +1,13 @@
 # Deep Research Agent API
 
-A production-ready AI research assistant API built on Cloudflare Workers that performs comprehensive web research, synthesizes findings, and delivers citation-backed answers.
+![JavaScript](https://img.shields.io/badge/JavaScript-ES_Modules-F7DF1E?logo=javascript&logoColor=black)
+![Cloudflare Workers](https://img.shields.io/badge/Cloudflare_Workers-Edge-F38020?logo=cloudflare&logoColor=white)
+![OpenAI](https://img.shields.io/badge/OpenAI-Responses_API-412991?logo=openai&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-**Live Demo:** https://deep-research-agent.vetapp.workers.dev/docs
+A production-deployed AI research agent running on Cloudflare's global edge network (300+ data centers). Performs multi-round web research with source quality scoring, conflict detection, and hallucination mitigation — delivering citation-backed answers, not just summaries.
+
+> **LIVE & DEPLOYED:** https://deep-research-agent.vetapp.workers.dev/docs
 
 ## What It Does
 
@@ -99,13 +104,22 @@ Open `test.html` in a browser for a full-featured testing UI with:
 - Real-time debug logs
 - Formatted results with fact tables
 
+## What Makes This Different
+
+| Capability | Why It Matters |
+|---|---|
+| **Multi-Round Research** | Iteratively refines searches instead of single-shot retrieval — catches what one query misses |
+| **Source Quality Scoring** | Ranks citations by authority (.gov=5, docs=4, social=1) — not all sources are equal |
+| **Conflict Detection** | Flags when sources contradict each other — prevents confident wrong answers |
+| **Live Production Deployment** | Running on Cloudflare's edge, not a local demo — globally distributed, low-latency |
+
 ## Skills Demonstrated
 
-- **API Design** - RESTful endpoints with comprehensive options
-- **AI Integration** - OpenAI Responses API, tool use, multi-turn orchestration
-- **Edge Computing** - Cloudflare Workers, serverless architecture
-- **Data Pipeline** - Multi-stage processing with quality scoring
-- **Error Handling** - Graceful degradation, validation, conflict detection
+- **Edge Computing & Serverless Architecture** — Cloudflare Workers, globally distributed, zero cold starts
+- **AI Agent Design** — Multi-round research pipeline with progressive refinement and coverage checks
+- **Source Validation & Hallucination Mitigation** — Quality scoring, conflict detection, evidence-backed synthesis
+- **API Design & Authentication** — RESTful endpoints, API key protection, comprehensive configuration options
+- **OpenAI API Integration** — Responses API, web_search tool use, multi-turn orchestration, deep research mode
 
 ## License
 
